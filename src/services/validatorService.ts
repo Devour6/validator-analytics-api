@@ -55,10 +55,25 @@ export class ValidatorService {
         )
       ]);
       
-      console.log(`Found ${voteAccounts.current.length} active validators and ${voteAccounts.delinquent.length} delinquent validators`);
+      // Guard against null/undefined voteAccounts and missing properties
+      if (!voteAccounts) {
+        console.warn('Vote accounts data is null or undefined, returning empty result');
+        return {
+          validators: [],
+          epoch: epochInfo?.epoch || 0,
+          totalValidators: 0,
+          totalStake: 0,
+          timestamp: Date.now()
+        };
+      }
+      
+      const currentValidators = voteAccounts.current || [];
+      const delinquentValidators = voteAccounts.delinquent || [];
+      
+      console.log(`Found ${currentValidators.length} active validators and ${delinquentValidators.length} delinquent validators`);
       
       // Combine current and delinquent validators
-      const allValidators = [...voteAccounts.current, ...voteAccounts.delinquent];
+      const allValidators = [...currentValidators, ...delinquentValidators];
       
       // Fetch validator names from validator-info program in batches
       const validatorInfoMap = await this.fetchValidatorInfoBatch(
