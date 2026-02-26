@@ -13,7 +13,12 @@ import {
 import { 
   ValidatorInfo, 
   ValidatorInfoResponse, 
-  ValidatorInfoProgramData
+  ValidatorInfoProgramData,
+  ValidatorDetailInfo,
+  ValidatorHistoryData,
+  CurrentEpochInfo,
+  StakeAccount,
+  WalletStakeAccountsResponse
 } from '../types/validator';
 
 export class ValidatorService {
@@ -316,5 +321,397 @@ export class ValidatorService {
       
       throw new Error(`RPC health check failed after ${responseTime}ms: ${errorMessage}`);
     }
+  }
+
+  /**
+   * V2 ENDPOINT: Get detailed information for a single validator
+   */
+  async getValidatorDetail(voteAccount: string): Promise<ValidatorDetailInfo> {
+    try {
+      console.log(`Fetching detailed info for validator: ${voteAccount}`);
+      
+      const voteAccountPubkey = new PublicKey(voteAccount);
+      
+      // Get current epoch info
+      const epochInfo = await Promise.race([
+        this.connection.getEpochInfo(),
+        new Promise<never>((_, reject) => 
+          setTimeout(() => reject(new Error('Epoch info timeout')), this.REQUEST_TIMEOUT)
+        )
+      ]);
+      
+      // Get vote accounts to find this specific validator
+      const voteAccounts = await Promise.race([
+        this.connection.getVoteAccounts(),
+        new Promise<never>((_, reject) => 
+          setTimeout(() => reject(new Error('Vote accounts timeout')), this.REQUEST_TIMEOUT)
+        )
+      ]);
+      
+      // Find the validator in current or delinquent lists
+      const allValidators = [...(voteAccounts.current || []), ...(voteAccounts.delinquent || [])];
+      const validator = allValidators.find(v => v.votePubkey === voteAccount);
+      
+      if (!validator) {
+        throw new Error(`Validator ${voteAccount} not found`);
+      }
+      
+      const isDelinquent = (voteAccounts.delinquent || []).some(v => v.votePubkey === voteAccount);
+      
+      // Get validator name from validator-info program
+      const name = await this.getValidatorName(voteAccount);
+      
+      // Calculate epoch credits history (last 10 epochs)
+      const epochCreditsHistory = this.calculateEpochCreditsHistory(validator.epochCredits, epochInfo.epoch);
+      
+      // Calculate estimated APY and skip rate
+      const { estimatedApy, skipRate } = this.calculatePerformanceMetrics(epochCreditsHistory, epochInfo);
+      
+      // Calculate current epoch performance
+      const currentEpochPerformance = this.calculateCurrentEpochPerformance(validator.epochCredits, epochInfo);
+      
+      return {
+        voteAccount,
+        identity: validator.nodePubkey,
+        name,
+        commission: validator.commission,
+        lastVote: (validator as any).lastVote || null,
+        rootSlot: (validator as any).rootSlot || null,
+        activatedStake: validator.activatedStake,
+        epochVoteAccount: validator.epochVoteAccount,
+        delinquent: isDelinquent,
+        epochCreditsHistory,
+        estimatedApy,
+        skipRate,
+        currentEpochPerformance
+      };
+      
+    } catch (error) {
+      console.error(`Error fetching validator detail for ${voteAccount}:`, error);
+      throw new Error(`Failed to fetch validator detail: ${error}`);
+    }
+  }
+
+  /**
+   * V2 ENDPOINT: Get historical performance data for a validator
+   */
+  async getValidatorHistory(voteAccount: string): Promise<ValidatorHistoryData> {
+    try {
+      console.log(`Fetching history for validator: ${voteAccount}`);
+      
+      // Get current validator data
+      const validatorDetail = await this.getValidatorDetail(voteAccount);
+      
+      // For now, we'll use the epoch credits history to build performance history
+      // In a full implementation, this would query historical RPC data or a data store
+      const epochHistory = validatorDetail.epochCreditsHistory.map((epochCredit, index) => {
+        const creditsEarned = index > 0 
+          ? epochCredit.credits - validatorDetail.epochCreditsHistory[index - 1].credits
+          : epochCredit.credits;
+          
+        return {
+          epoch: epochCredit.epoch,
+          credits: epochCredit.credits,
+          creditsEarned,
+          commission: validatorDetail.commission, // Current commission (historical data would require storage)
+          activatedStake: validatorDetail.activatedStake, // Current stake (historical data would require storage)
+          skipRate: this.calculateEpochSkipRate(creditsEarned, epochCredit.epoch),
+          timestamp: Date.now() - ((validatorDetail.epochCreditsHistory.length - index - 1) * 432000000) // Approximate epoch duration
+        };
+      });
+      
+      // Commission history (simplified - would need historical storage)
+      const commissionHistory = [{
+        epoch: validatorDetail.epochCreditsHistory[0]?.epoch || 0,
+        commission: validatorDetail.commission,
+        changedAt: Date.now()
+      }];
+      
+      // Stake history (simplified - would need historical storage)  
+      const stakeHistory = [{
+        epoch: validatorDetail.epochCreditsHistory[0]?.epoch || 0,
+        activatedStake: validatorDetail.activatedStake,
+        changedAt: Date.now()
+      }];
+      
+      return {
+        voteAccount,
+        epochHistory,
+        commissionHistory,
+        stakeHistory
+      };
+      
+    } catch (error) {
+      console.error(`Error fetching validator history for ${voteAccount}:`, error);
+      throw new Error(`Failed to fetch validator history: ${error}`);
+    }
+  }
+
+  /**
+   * V2 ENDPOINT: Get current epoch information
+   */
+  async getCurrentEpochInfo(): Promise<CurrentEpochInfo> {
+    try {
+      console.log('Fetching current epoch info...');
+      
+      const [epochInfo, slot] = await Promise.all([
+        Promise.race([
+          this.connection.getEpochInfo(),
+          new Promise<never>((_, reject) => 
+            setTimeout(() => reject(new Error('Epoch info timeout')), this.REQUEST_TIMEOUT)
+          )
+        ]),
+        Promise.race([
+          this.connection.getSlot(),
+          new Promise<never>((_, reject) => 
+            setTimeout(() => reject(new Error('Slot timeout')), this.REQUEST_TIMEOUT)
+          )
+        ])
+      ]);
+      
+      // Get vote accounts to calculate total active stake and validator count
+      const voteAccounts = await Promise.race([
+        this.connection.getVoteAccounts(),
+        new Promise<never>((_, reject) => 
+          setTimeout(() => reject(new Error('Vote accounts timeout')), this.REQUEST_TIMEOUT)
+        )
+      ]);
+      
+      const currentValidators = voteAccounts.current || [];
+      const totalActiveStake = currentValidators.reduce((sum, v) => sum + v.activatedStake, 0);
+      
+      // Calculate epoch progress
+      const progress = (epochInfo.slotIndex / epochInfo.slotsInEpoch) * 100;
+      
+      // Estimate time remaining (assuming 400ms per slot)
+      const slotsRemaining = epochInfo.slotsInEpoch - epochInfo.slotIndex;
+      const timeRemainingMs = slotsRemaining * 400; // Approximate slot time
+      
+      return {
+        epoch: epochInfo.epoch,
+        slotIndex: epochInfo.slotIndex,
+        slotsInEpoch: epochInfo.slotsInEpoch,
+        progress,
+        timeRemainingMs,
+        totalActiveStake,
+        activeValidatorCount: currentValidators.length,
+        currentSlot: slot,
+        epochStartSlot: slot - epochInfo.slotIndex,
+        timestamp: Date.now()
+      };
+      
+    } catch (error) {
+      console.error('Error fetching current epoch info:', error);
+      throw new Error(`Failed to fetch current epoch info: ${error}`);
+    }
+  }
+
+  /**
+   * V2 ENDPOINT: Get stake accounts for a wallet address
+   */
+  async getWalletStakeAccounts(wallet: string): Promise<WalletStakeAccountsResponse> {
+    try {
+      console.log(`Fetching stake accounts for wallet: ${wallet}`);
+      
+      const walletPubkey = new PublicKey(wallet);
+      
+      // Get stake accounts owned by this wallet
+      const stakeAccounts = await Promise.race([
+        this.connection.getParsedProgramAccounts(
+          new PublicKey('Stake11111111111111111111111111111111111112'), // Stake program ID
+          {
+            filters: [
+              {
+                memcmp: {
+                  offset: 44, // Stake authority offset in stake account
+                  bytes: walletPubkey.toBase58()
+                }
+              }
+            ]
+          }
+        ),
+        new Promise<never>((_, reject) => 
+          setTimeout(() => reject(new Error('Stake accounts timeout')), this.REQUEST_TIMEOUT * 2)
+        )
+      ]);
+      
+      // Get validator names for delegation info
+      const validatorNames = new Map<string, string>();
+      
+      // Parse stake account data
+      const parsedStakeAccounts: (StakeAccount | null)[] = await Promise.all(
+        stakeAccounts.map(async (account) => {
+          try {
+            const accountData = account.account.data as any;
+            const stakeData = accountData?.parsed?.info;
+            
+            if (!stakeData) {
+              return null;
+            }
+            
+            const delegation = stakeData.stake?.delegation;
+            const meta = stakeData.meta;
+            
+            let voteAccount: string | null = null;
+            let validatorName: string | null = null;
+            let state: 'active' | 'activating' | 'deactivating' | 'inactive' = 'inactive';
+            
+            if (delegation) {
+              voteAccount = delegation.voter;
+              
+              // Get validator name if not cached
+              if (voteAccount && !validatorNames.has(voteAccount)) {
+                const name = await this.getValidatorName(voteAccount);
+                if (name) {
+                  validatorNames.set(voteAccount, name);
+                }
+              }
+              validatorName = voteAccount ? (validatorNames.get(voteAccount) || null) : null;
+              
+              // Determine state based on activation epochs
+              const currentEpoch = await this.connection.getEpochInfo().then(info => info.epoch);
+              if (delegation.activationEpoch <= currentEpoch) {
+                if (delegation.deactivationEpoch < currentEpoch) {
+                  state = 'deactivating';
+                } else {
+                  state = 'active';
+                }
+              } else {
+                state = 'activating';
+              }
+            }
+            
+            return {
+              pubkey: account.pubkey.toBase58(),
+              voteAccount,
+              validatorName,
+              stake: stakeData.stake?.delegation?.stake || 0,
+              state,
+              activationEpoch: delegation?.activationEpoch || null,
+              deactivationEpoch: delegation?.deactivationEpoch || null,
+              stakeAuthority: meta?.authorized?.staker || '',
+              withdrawAuthority: meta?.authorized?.withdrawer || '',
+              rentExemptReserve: meta?.rentExemptReserve || 0,
+              creditsObserved: delegation?.creditsObserved || 0,
+              estimatedRewards: this.calculateStakeRewards(stakeData.stake?.delegation) // Simplified calculation
+            };
+          } catch (error) {
+            console.debug(`Error parsing stake account ${account.pubkey.toBase58()}:`, error);
+            return null;
+          }
+        })
+      );
+      
+      // Filter out null results and calculate totals
+      const validStakeAccounts = parsedStakeAccounts.filter((account): account is StakeAccount => account !== null);
+      
+      const totalStaked = validStakeAccounts.reduce((sum, account) => sum + account.stake, 0);
+      const totalEstimatedRewards = validStakeAccounts.reduce((sum, account) => sum + account.estimatedRewards, 0);
+      const validatorCount = new Set(validStakeAccounts.map(account => account.voteAccount).filter((voteAccount): voteAccount is string => voteAccount !== null)).size;
+      
+      return {
+        wallet,
+        stakeAccounts: validStakeAccounts,
+        totalStaked,
+        totalEstimatedRewards,
+        validatorCount,
+        timestamp: Date.now()
+      };
+      
+    } catch (error) {
+      console.error(`Error fetching stake accounts for wallet ${wallet}:`, error);
+      throw new Error(`Failed to fetch stake accounts: ${error}`);
+    }
+  }
+
+  // Helper methods for calculations
+
+  private calculateEpochCreditsHistory(epochCredits: Array<[number, number, number]>, currentEpoch: number) {
+    // Take last 10 epochs of data
+    const recentCredits = epochCredits.slice(-10);
+    
+    return recentCredits.map(([epoch, credits, previousCredits]) => ({
+      epoch,
+      credits,
+      previousCredits
+    }));
+  }
+
+  private calculatePerformanceMetrics(epochCreditsHistory: any[], epochInfo: any) {
+    if (epochCreditsHistory.length < 2) {
+      return { estimatedApy: 0, skipRate: 0 };
+    }
+    
+    // Calculate average credits earned per epoch
+    let totalCreditsEarned = 0;
+    let epochsWithCredits = 0;
+    
+    for (let i = 1; i < epochCreditsHistory.length; i++) {
+      const creditsEarned = epochCreditsHistory[i].credits - epochCreditsHistory[i-1].credits;
+      if (creditsEarned > 0) {
+        totalCreditsEarned += creditsEarned;
+        epochsWithCredits++;
+      }
+    }
+    
+    const avgCreditsPerEpoch = epochsWithCredits > 0 ? totalCreditsEarned / epochsWithCredits : 0;
+    
+    // Estimate skip rate (simplified calculation)
+    const expectedCreditsPerEpoch = epochInfo.slotsInEpoch || 432000; // Approximate slots per epoch
+    const skipRate = epochsWithCredits > 0 
+      ? Math.max(0, (expectedCreditsPerEpoch - avgCreditsPerEpoch) / expectedCreditsPerEpoch * 100)
+      : 0;
+    
+    // Estimate APY based on credits performance (simplified)
+    // This is a rough calculation - actual APY depends on many factors
+    const baseApy = 7; // Base Solana staking APY
+    const performanceMultiplier = avgCreditsPerEpoch / (expectedCreditsPerEpoch || 1);
+    const estimatedApy = baseApy * Math.min(performanceMultiplier, 1.2); // Cap at 20% bonus
+    
+    return { estimatedApy, skipRate };
+  }
+
+  private calculateCurrentEpochPerformance(epochCredits: Array<[number, number, number]>, epochInfo: any) {
+    if (epochCredits.length < 2) {
+      return {
+        creditsEarned: 0,
+        expectedCredits: 0,
+        performanceScore: 0
+      };
+    }
+    
+    const latestCredit = epochCredits[epochCredits.length - 1];
+    const previousCredit = epochCredits[epochCredits.length - 2];
+    
+    const creditsEarned = latestCredit[1] - previousCredit[1];
+    const expectedCredits = epochInfo.slotIndex || 0; // Simplified
+    const performanceScore = expectedCredits > 0 ? (creditsEarned / expectedCredits) * 100 : 0;
+    
+    return {
+      creditsEarned,
+      expectedCredits,
+      performanceScore: Math.min(performanceScore, 100)
+    };
+  }
+
+  private calculateEpochSkipRate(creditsEarned: number, epoch: number): number {
+    // Simplified skip rate calculation
+    // In practice, this would need historical slot data
+    const expectedSlots = 432000; // Approximate slots per epoch
+    return Math.max(0, (expectedSlots - creditsEarned) / expectedSlots * 100);
+  }
+
+  private calculateStakeRewards(delegation: any): number {
+    // Simplified rewards calculation
+    // In practice, this would need detailed historical data and inflation calculations
+    if (!delegation || !delegation.stake) {
+      return 0;
+    }
+    
+    const stakeAmount = delegation.stake;
+    const annualRewardRate = 0.07; // 7% approximate
+    const epochsPerYear = 365.25 * 24 * 60 * 60 / (432000 * 0.4); // Approximate
+    
+    return Math.floor(stakeAmount * (annualRewardRate / epochsPerYear));
   }
 }
