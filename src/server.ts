@@ -6,6 +6,8 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import rateLimit from 'express-rate-limit';
+import Joi from 'joi';
 import { ValidatorService } from './services/validatorService';
 
 // Load environment variables
@@ -18,9 +20,34 @@ const RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.c
 // Initialize services
 const validatorService = new ValidatorService(RPC_URL);
 
+// Rate limiting middleware
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // Limit each IP to 100 requests per windowMs
+  message: {
+    error: 'Too Many Requests',
+    message: 'Rate limit exceeded. Please try again later.',
+    retryAfter: '15 minutes'
+  },
+  standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
+  legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+});
+
+// API-specific rate limiting (stricter for the main endpoint)
+const apiLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 10, // Limit each IP to 10 requests per minute for API endpoints
+  message: {
+    error: 'API Rate Limit Exceeded',
+    message: 'Too many API requests. Please wait before making more requests.',
+    retryAfter: '1 minute'
+  },
+});
+
 // Middleware
 app.use(cors());
 app.use(express.json());
+app.use(limiter); // Apply to all requests
 
 // Request logging middleware
 app.use((req, res, next) => {
@@ -28,6 +55,40 @@ app.use((req, res, next) => {
   console.log(`${timestamp} ${req.method} ${req.path} - ${req.ip}`);
   next();
 });
+
+// Input validation schemas
+const validatorQuerySchema = Joi.object({
+  limit: Joi.number().integer().min(1).max(1000).optional(),
+  sortBy: Joi.string().valid('stake', 'commission', 'name').default('stake'),
+  order: Joi.string().valid('asc', 'desc').default('desc'),
+  activeOnly: Joi.boolean().optional().default(false)
+});
+
+// Validation middleware
+const validateQuery = (schema: Joi.ObjectSchema) => {
+  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const { error, value } = schema.validate(req.query, { 
+      convert: true, 
+      stripUnknown: true 
+    });
+    
+    if (error) {
+      return res.status(400).json({
+        error: 'Invalid Query Parameters',
+        message: 'Request contains invalid parameters',
+        details: error.details.map(detail => ({
+          field: detail.path.join('.'),
+          message: detail.message,
+          value: detail.context?.value
+        })),
+        timestamp: Date.now()
+      });
+    }
+    
+    req.query = value;
+    next();
+  };
+};
 
 // Health check endpoint
 app.get('/health', async (req, res) => {
@@ -58,7 +119,7 @@ app.get('/health', async (req, res) => {
  * Combines data from getVoteAccounts RPC call and validator-info program.
  * 
  * Query Parameters:
- * - limit: Number of validators to return (default: all)
+ * - limit: Number of validators to return (1-1000, default: all)
  * - sortBy: Sort field (stake|commission|name) (default: stake)
  * - order: Sort order (asc|desc) (default: desc)
  * - activeOnly: Only return active validators (default: false)
@@ -72,15 +133,12 @@ app.get('/health', async (req, res) => {
  *   timestamp: number
  * }
  */
-app.get('/api/validators', async (req, res) => {
+app.get('/api/validators', apiLimiter, validateQuery(validatorQuerySchema), async (req, res) => {
   try {
     const startTime = Date.now();
     
-    // Parse query parameters
-    const limit = req.query.limit ? parseInt(req.query.limit as string) : undefined;
-    const sortBy = (req.query.sortBy as string) || 'stake';
-    const order = (req.query.order as string) || 'desc';
-    const activeOnly = req.query.activeOnly === 'true';
+    // Extract validated query parameters
+    const { limit, sortBy, order, activeOnly } = req.query as any;
     
     console.log(`Fetching validators with filters: limit=${limit}, sortBy=${sortBy}, order=${order}, activeOnly=${activeOnly}`);
     
@@ -155,10 +213,31 @@ app.get('/api/validators', async (req, res) => {
     
   } catch (error) {
     console.error('Error in /api/validators:', error);
-    res.status(500).json({
-      error: 'Internal Server Error',
-      message: 'Failed to fetch validator data',
-      details: error instanceof Error ? error.message : 'Unknown error',
+    
+    // Determine appropriate error response based on error type
+    let statusCode = 500;
+    let errorMessage = 'Failed to fetch validator data';
+    
+    if (error instanceof Error) {
+      // Check for specific error types
+      if (error.message.includes('Connection') || error.message.includes('network')) {
+        statusCode = 503;
+        errorMessage = 'Unable to connect to Solana RPC. Please try again later.';
+      } else if (error.message.includes('timeout')) {
+        statusCode = 504;
+        errorMessage = 'Request timed out. Please try again.';
+      } else if (error.message.includes('Rate limit') || error.message.includes('429')) {
+        statusCode = 429;
+        errorMessage = 'RPC rate limit exceeded. Please try again later.';
+      }
+    }
+    
+    res.status(statusCode).json({
+      error: statusCode === 500 ? 'Internal Server Error' : 'Service Error',
+      message: errorMessage,
+      details: process.env.NODE_ENV === 'development' 
+        ? (error instanceof Error ? error.message : 'Unknown error')
+        : undefined,
       timestamp: Date.now()
     });
   }
