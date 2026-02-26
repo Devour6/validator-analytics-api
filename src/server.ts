@@ -35,12 +35,19 @@ const limiter = rateLimit({
 
 // API-specific rate limiting (stricter for the main endpoint)
 const apiLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: process.env.NODE_ENV === 'test' ? 100 : 10, // Higher limit for tests to avoid conflicts
+  windowMs: process.env.NODE_ENV === 'test' ? 5000 : 60 * 1000, // 5 seconds for tests, 1 minute for production
+  max: process.env.NODE_ENV === 'test' ? 6 : 10, // 6 requests per 5 seconds for tests
   message: {
     error: 'API Rate Limit Exceeded',
     message: 'Too many API requests. Please wait before making more requests.',
-    retryAfter: '1 minute'
+    retryAfter: process.env.NODE_ENV === 'test' ? '5 seconds' : '1 minute'
+  },
+  skip: (req) => {
+    // Skip rate limiting in tests unless specifically testing rate limits
+    if (process.env.NODE_ENV === 'test' && !req.headers['x-test-rate-limit']) {
+      return true;
+    }
+    return false;
   },
 });
 

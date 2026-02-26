@@ -279,9 +279,11 @@ describe('API Endpoints', () => {
     });
 
     it('should apply rate limiting to API endpoints', async () => {
-      // Make multiple rapid requests to test rate limiting
+      // Make multiple rapid requests with rate limiting enabled
       const promises = Array(12).fill(0).map(() => 
-        request(app).get('/api/validators')
+        request(app)
+          .get('/api/validators')
+          .set('x-test-rate-limit', 'true')
       );
 
       const responses = await Promise.all(promises);
