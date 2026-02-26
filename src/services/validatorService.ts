@@ -3,7 +3,13 @@
  * Fetches validator data from Solana RPC only - no third-party APIs
  */
 
-import { Connection, PublicKey, AccountInfo, VoteAccountInfo, VoteAccountStatus } from '@solana/web3.js';
+import { 
+  Connection,
+  PublicKey,
+  AccountInfo, 
+  VoteAccountInfo, 
+  VoteAccountStatus
+} from '@solana/web3.js';
 import { 
   ValidatorInfo, 
   ValidatorInfoResponse, 
@@ -13,9 +19,17 @@ import {
 export class ValidatorService {
   private connection: Connection;
   private readonly VALIDATOR_INFO_PROGRAM_ID = new PublicKey('Va1idkzkB6LEmVFmxWbWU5Ao17SMcTLofw1bh6qr5RP');
+  private readonly REQUEST_TIMEOUT = 30000; // 30 seconds
+  private readonly MAX_RETRIES = 3;
+  private readonly BATCH_SIZE = 50; // Reduced batch size for better reliability
 
   constructor(rpcUrl: string = 'https://api.mainnet-beta.solana.com') {
-    this.connection = new Connection(rpcUrl, 'confirmed');
+    this.connection = new Connection(rpcUrl, {
+      commitment: 'confirmed',
+      wsEndpoint: undefined, // Disable websocket to avoid connection issues
+      disableRetryOnRateLimit: false,
+      confirmTransactionInitialTimeout: this.REQUEST_TIMEOUT,
+    });
   }
 
   /**
@@ -25,16 +39,41 @@ export class ValidatorService {
     try {
       console.log('Fetching vote accounts from RPC...');
       
-      // Get current epoch
-      const epochInfo = await this.connection.getEpochInfo();
+      // Get current epoch with timeout
+      const epochInfo = await Promise.race([
+        this.connection.getEpochInfo(),
+        new Promise<never>((_, reject) => 
+          setTimeout(() => reject(new Error('Epoch info request timeout')), this.REQUEST_TIMEOUT)
+        )
+      ]);
       
-      // Fetch all vote accounts
-      const voteAccounts: VoteAccountStatus = await this.connection.getVoteAccounts();
+      // Fetch all vote accounts with timeout
+      const voteAccounts: VoteAccountStatus = await Promise.race([
+        this.connection.getVoteAccounts(),
+        new Promise<never>((_, reject) => 
+          setTimeout(() => reject(new Error('Vote accounts request timeout')), this.REQUEST_TIMEOUT)
+        )
+      ]);
       
-      console.log(`Found ${voteAccounts.current.length} active validators and ${voteAccounts.delinquent.length} delinquent validators`);
+      // Guard against null/undefined voteAccounts and missing properties
+      if (!voteAccounts) {
+        console.warn('Vote accounts data is null or undefined, returning empty result');
+        return {
+          validators: [],
+          epoch: epochInfo?.epoch || 0,
+          totalValidators: 0,
+          totalStake: 0,
+          timestamp: Date.now()
+        };
+      }
+      
+      const currentValidators = voteAccounts.current || [];
+      const delinquentValidators = voteAccounts.delinquent || [];
+      
+      console.log(`Found ${currentValidators.length} active validators and ${delinquentValidators.length} delinquent validators`);
       
       // Combine current and delinquent validators
-      const allValidators = [...voteAccounts.current, ...voteAccounts.delinquent];
+      const allValidators = [...currentValidators, ...delinquentValidators];
       
       // Fetch validator names from validator-info program in batches
       const validatorInfoMap = await this.fetchValidatorInfoBatch(
@@ -79,16 +118,22 @@ export class ValidatorService {
    */
   private async fetchValidatorInfoBatch(votePubkeys: string[]): Promise<Map<string, string>> {
     const validatorInfoMap = new Map<string, string>();
-    const BATCH_SIZE = 100; // Reasonable batch size to avoid RPC limits
     
-    console.log(`Fetching validator info for ${votePubkeys.length} validators in batches of ${BATCH_SIZE}...`);
+    console.log(`Fetching validator info for ${votePubkeys.length} validators in batches of ${this.BATCH_SIZE}...`);
     
-    for (let i = 0; i < votePubkeys.length; i += BATCH_SIZE) {
-      const batch = votePubkeys.slice(i, i + BATCH_SIZE);
-      await this.processBatch(batch, validatorInfoMap);
+    for (let i = 0; i < votePubkeys.length; i += this.BATCH_SIZE) {
+      const batch = votePubkeys.slice(i, i + this.BATCH_SIZE);
       
-      // Small delay to be respectful to RPC endpoint
-      await new Promise(resolve => setTimeout(resolve, 100));
+      try {
+        await this.processBatch(batch, validatorInfoMap);
+      } catch (error) {
+        console.error(`Failed to process batch ${Math.floor(i / this.BATCH_SIZE) + 1}:`, error);
+        // Continue with next batch instead of failing entirely
+      }
+      
+      // Progressive delay to be respectful to RPC endpoint
+      const delay = Math.min(200 + (i / this.BATCH_SIZE) * 50, 1000);
+      await new Promise(resolve => setTimeout(resolve, delay));
     }
     
     console.log(`Found validator info for ${validatorInfoMap.size} out of ${votePubkeys.length} validators`);
@@ -115,57 +160,79 @@ export class ValidatorService {
   }
 
   /**
-   * Get validator name from validator-info program
+   * Get validator name from validator-info program with retry logic
    */
   private async getValidatorName(votePubkey: string): Promise<string | null> {
-    try {
-      // Derive the validator info account PDA
-      const [validatorInfoAccount] = PublicKey.findProgramAddressSync(
-        [Buffer.from('validator-info'), new PublicKey(votePubkey).toBuffer()],
-        this.VALIDATOR_INFO_PROGRAM_ID
-      );
-      
-      // Get the account data
-      const accountInfo: AccountInfo<Buffer> | null = await this.connection.getAccountInfo(validatorInfoAccount);
-      
-      if (!accountInfo || !accountInfo.data) {
-        return null;
+    for (let attempt = 1; attempt <= this.MAX_RETRIES; attempt++) {
+      try {
+        // Derive the validator info account PDA
+        const [validatorInfoAccount] = PublicKey.findProgramAddressSync(
+          [Buffer.from('validator-info'), new PublicKey(votePubkey).toBuffer()],
+          this.VALIDATOR_INFO_PROGRAM_ID
+        );
+        
+        // Get the account data with timeout
+        const accountInfo: AccountInfo<Buffer> | null = await Promise.race([
+          this.connection.getAccountInfo(validatorInfoAccount),
+          new Promise<null>((_, reject) => 
+            setTimeout(() => reject(new Error('Request timeout')), this.REQUEST_TIMEOUT)
+          )
+        ]);
+        
+        if (!accountInfo || !accountInfo.data || accountInfo.data.length === 0) {
+          return null;
+        }
+        
+        // Parse the validator info data
+        const data = this.parseValidatorInfoData(accountInfo.data);
+        return data.name || null;
+        
+      } catch (error) {
+        const isLastAttempt = attempt === this.MAX_RETRIES;
+        
+        if (isLastAttempt) {
+          console.debug(`Failed to fetch validator info for ${votePubkey} after ${this.MAX_RETRIES} attempts:`, error);
+        } else {
+          console.debug(`Attempt ${attempt} failed for ${votePubkey}, retrying...`);
+          // Exponential backoff
+          await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt - 1) * 1000));
+        }
+        
+        if (isLastAttempt) {
+          return null;
+        }
       }
-      
-      // Parse the validator info data (simplified parsing)
-      const data = this.parseValidatorInfoData(accountInfo.data);
-      return data.name || null;
-      
-    } catch (error) {
-      console.debug(`Error fetching validator info for ${votePubkey}:`, error);
-      return null;
     }
+    
+    return null;
   }
 
   /**
-   * Parse validator info program data (simplified)
-   * The actual format is more complex, but this extracts the name field
+   * Parse validator info program data using fallback parsing
+   * TODO: Implement proper borsh deserialization in future version
    */
   private parseValidatorInfoData(data: Buffer): ValidatorInfoProgramData {
     try {
-      // Skip the discriminator (8 bytes) and parse the ConfigData struct
-      // This is a simplified parser - full implementation would need proper borsh deserialization
+      // The validator info account data structure:
+      // - First 8 bytes: discriminator 
+      // - Remaining: borsh-serialized ConfigData struct
       
-      let offset = 8; // Skip discriminator
+      if (data.length < 8) {
+        console.debug('Invalid validator info data: too short');
+        return {};
+      }
       
-      // Read the config data (this is a simplified approach)
-      // In production, you'd want to use borsh to properly deserialize
+      // Skip the 8-byte discriminator
+      const configDataBuffer = data.slice(8);
       
-      // For now, let's try to extract strings that look like names
-      const dataStr = data.toString('utf8', offset);
+      if (configDataBuffer.length === 0) {
+        console.debug('No config data found after discriminator');
+        return {};
+      }
       
-      // Look for patterns that might be validator names
-      // This is a heuristic approach - proper implementation would decode the borsh format
-      const nameMatch = dataStr.match(/([A-Za-z0-9\s\-_\.]+)/);
-      
-      return {
-        name: nameMatch ? nameMatch[1].trim() : undefined
-      };
+      // Use fallback parsing for now
+      // TODO: Implement proper borsh deserialization
+      return this.fallbackParseValidatorInfo(configDataBuffer);
       
     } catch (error) {
       console.debug('Error parsing validator info data:', error);
@@ -174,20 +241,80 @@ export class ValidatorService {
   }
 
   /**
+   * Fallback parser for validator info data when borsh fails
+   */
+  private fallbackParseValidatorInfo(data: Buffer): ValidatorInfoProgramData {
+    try {
+      // Convert to string and look for readable text patterns
+      const dataStr = data.toString('utf8');
+      
+      // Remove null bytes and control characters
+      const cleanStr = dataStr.replace(/[\x00-\x1F\x7F]/g, '');
+      
+      // Look for patterns that might be validator names (alphanumeric with common punctuation)
+      const nameMatch = cleanStr.match(/([A-Za-z0-9][\w\s\-_\.]{2,50}[A-Za-z0-9])/);
+      
+      // Look for website patterns
+      const websiteMatch = cleanStr.match(/(https?:\/\/[\w\-\.]+\.[a-z]{2,6}[\/\w\-\._~:/?#[\]@!$&'()*+,;=]*)/i);
+      
+      const result: ValidatorInfoProgramData = {};
+      
+      if (nameMatch && nameMatch[1].length >= 3 && nameMatch[1].length <= 50) {
+        result.name = nameMatch[1].trim();
+      }
+      
+      if (websiteMatch) {
+        result.website = websiteMatch[1];
+      }
+      
+      return result;
+      
+    } catch (error) {
+      console.debug('Fallback parsing failed:', error);
+      return {};
+    }
+  }
+
+  /**
    * Health check - verify RPC connection is working
    */
-  async healthCheck(): Promise<{ status: string; blockHeight: number; epoch: number }> {
+  async healthCheck(): Promise<{ status: string; blockHeight: number; epoch: number; responseTimeMs: number }> {
+    const startTime = Date.now();
+    
     try {
-      const slot = await this.connection.getSlot();
-      const epochInfo = await this.connection.getEpochInfo();
+      // Test RPC connection with timeout
+      const [slot, epochInfo] = await Promise.all([
+        Promise.race([
+          this.connection.getSlot(),
+          new Promise<never>((_, reject) => 
+            setTimeout(() => reject(new Error('Slot request timeout')), 10000)
+          )
+        ]),
+        Promise.race([
+          this.connection.getEpochInfo(),
+          new Promise<never>((_, reject) => 
+            setTimeout(() => reject(new Error('Epoch info request timeout')), 10000)
+          )
+        ])
+      ]);
+      
+      const responseTime = Date.now() - startTime;
       
       return {
         status: 'healthy',
         blockHeight: slot,
-        epoch: epochInfo.epoch
+        epoch: epochInfo.epoch,
+        responseTimeMs: responseTime
       };
     } catch (error) {
-      throw new Error(`RPC health check failed: ${error}`);
+      const responseTime = Date.now() - startTime;
+      
+      let errorMessage = 'Unknown error';
+      if (error instanceof Error) {
+        errorMessage = error.message;
+      }
+      
+      throw new Error(`RPC health check failed after ${responseTime}ms: ${errorMessage}`);
     }
   }
 }
