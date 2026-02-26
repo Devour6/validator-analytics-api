@@ -3,7 +3,13 @@
  * Fetches validator data from Solana RPC only - no third-party APIs
  */
 
-import { Connection, PublicKey, AccountInfo, VoteAccountInfo, VoteAccountStatus } from '@solana/web3.js';
+import { 
+  Connection,
+  PublicKey,
+  AccountInfo, 
+  VoteAccountInfo, 
+  VoteAccountStatus
+} from '@solana/web3.js';
 import { 
   ValidatorInfo, 
   ValidatorInfoResponse, 

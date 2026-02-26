@@ -3,15 +3,20 @@
  */
 
 import { ValidatorService } from '../services/validatorService';
-import { Connection, PublicKey } from '@solana/web3.js';
+import { Connection } from '@solana/web3.js';
 
 // Mock @solana/web3.js
 jest.mock('@solana/web3.js', () => ({
   Connection: jest.fn(),
-  PublicKey: {
-    findProgramAddressSync: jest.fn(() => ['mockValidatorInfoAccount', 0]),
-  },
+  PublicKey: jest.fn().mockImplementation((key: string) => ({
+    toString: () => key,
+    toBuffer: () => Buffer.from(key),
+  })),
 }));
+
+// Add static methods to the PublicKey mock
+const { PublicKey } = jest.requireMock('@solana/web3.js');
+PublicKey.findProgramAddressSync = jest.fn(() => ['mockValidatorInfoAccount', 0]);
 
 describe('ValidatorService', () => {
   let validatorService: ValidatorService;

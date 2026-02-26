@@ -3,33 +3,29 @@
  */
 
 import request from 'supertest';
-import app from '../server';
 
-// Mock the ValidatorService
+// Create persistent mock functions
+const mockHealthCheck = jest.fn();
+const mockGetValidators = jest.fn();
+
+// Mock the ValidatorService BEFORE importing the server
 jest.mock('../services/validatorService', () => {
   return {
     ValidatorService: jest.fn().mockImplementation(() => ({
-      healthCheck: jest.fn(),
-      getValidators: jest.fn(),
+      healthCheck: mockHealthCheck,
+      getValidators: mockGetValidators,
     })),
   };
 });
 
+import app from '../server';
 import { ValidatorService } from '../services/validatorService';
 
 describe('API Endpoints', () => {
-  let mockValidatorService: jest.Mocked<ValidatorService>;
-
   beforeEach(() => {
-    // Create a fresh mock instance
-    mockValidatorService = {
-      healthCheck: jest.fn(),
-      getValidators: jest.fn(),
-    } as any;
-    
-    // Replace the constructor to return our mock
-    (ValidatorService as jest.Mock).mockImplementation(() => mockValidatorService);
-    jest.clearAllMocks();
+    // Clear previous mock calls but keep the functions
+    mockHealthCheck.mockReset();
+    mockGetValidators.mockReset();
   });
 
   describe('GET /', () => {
@@ -48,7 +44,7 @@ describe('API Endpoints', () => {
 
   describe('GET /health', () => {
     it('should return healthy status when service is working', async () => {
-      mockValidatorService.healthCheck.mockResolvedValue({
+      mockHealthCheck.mockResolvedValue({
         status: 'healthy',
         blockHeight: 12345,
         epoch: 250,
@@ -71,11 +67,11 @@ describe('API Endpoints', () => {
         },
       });
 
-      expect(mockValidatorService.healthCheck).toHaveBeenCalledTimes(1);
+      expect(mockHealthCheck).toHaveBeenCalledTimes(1);
     });
 
     it('should return error status when service is unhealthy', async () => {
-      mockValidatorService.healthCheck.mockRejectedValue(
+      mockHealthCheck.mockRejectedValue(
         new Error('RPC connection failed')
       );
 
@@ -126,7 +122,7 @@ describe('API Endpoints', () => {
     };
 
     beforeEach(() => {
-      mockValidatorService.getValidators.mockResolvedValue(mockValidatorData);
+      mockGetValidators.mockResolvedValue(mockValidatorData);
     });
 
     it('should return validator data with default parameters', async () => {
@@ -156,7 +152,7 @@ describe('API Endpoints', () => {
         },
       });
 
-      expect(mockValidatorService.getValidators).toHaveBeenCalledTimes(1);
+      expect(mockGetValidators).toHaveBeenCalledTimes(1);
     });
 
     it('should handle valid query parameters', async () => {
@@ -228,7 +224,7 @@ describe('API Endpoints', () => {
     });
 
     it('should handle service errors', async () => {
-      mockValidatorService.getValidators.mockRejectedValue(
+      mockGetValidators.mockRejectedValue(
         new Error('RPC connection failed')
       );
 
@@ -243,7 +239,7 @@ describe('API Endpoints', () => {
     });
 
     it('should handle timeout errors', async () => {
-      mockValidatorService.getValidators.mockRejectedValue(
+      mockGetValidators.mockRejectedValue(
         new Error('Request timeout')
       );
 
@@ -257,7 +253,7 @@ describe('API Endpoints', () => {
     });
 
     it('should handle rate limit errors', async () => {
-      mockValidatorService.getValidators.mockRejectedValue(
+      mockGetValidators.mockRejectedValue(
         new Error('Rate limit exceeded (429)')
       );
 
@@ -273,7 +269,7 @@ describe('API Endpoints', () => {
 
   describe('Rate Limiting', () => {
     beforeEach(() => {
-      mockValidatorService.getValidators.mockResolvedValue({
+      mockGetValidators.mockResolvedValue({
         validators: [],
         epoch: 250,
         totalValidators: 0,

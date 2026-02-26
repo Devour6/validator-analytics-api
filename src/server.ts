@@ -36,7 +36,7 @@ const limiter = rateLimit({
 // API-specific rate limiting (stricter for the main endpoint)
 const apiLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
-  max: 10, // Limit each IP to 10 requests per minute for API endpoints
+  max: process.env.NODE_ENV === 'test' ? 100 : 10, // Higher limit for tests to avoid conflicts
   message: {
     error: 'API Rate Limit Exceeded',
     message: 'Too many API requests. Please wait before making more requests.',
@@ -220,13 +220,13 @@ app.get('/api/validators', apiLimiter, validateQuery(validatorQuerySchema), asyn
     
     if (error instanceof Error) {
       // Check for specific error types
-      if (error.message.includes('Connection') || error.message.includes('network')) {
+      if (error.message.includes('Connection') || error.message.includes('network') || error.message.includes('connection')) {
         statusCode = 503;
         errorMessage = 'Unable to connect to Solana RPC. Please try again later.';
-      } else if (error.message.includes('timeout')) {
+      } else if (error.message.includes('timeout') || error.message.includes('Timeout')) {
         statusCode = 504;
         errorMessage = 'Request timed out. Please try again.';
-      } else if (error.message.includes('Rate limit') || error.message.includes('429')) {
+      } else if (error.message.includes('Rate limit') || error.message.includes('rate limit') || error.message.includes('429')) {
         statusCode = 429;
         errorMessage = 'RPC rate limit exceeded. Please try again later.';
       }
@@ -277,13 +277,15 @@ app.use((err: Error, req: express.Request, res: express.Response, next: express.
   });
 });
 
-// Start server
-app.listen(PORT, () => {
-  console.log(`🚀 Validator Analytics API running on port ${PORT}`);
-  console.log(`📡 Using Solana RPC: ${RPC_URL}`);
-  console.log(`🔍 API Documentation: http://localhost:${PORT}/`);
-  console.log(`⚡ Health Check: http://localhost:${PORT}/health`);
-  console.log(`🎯 Validators Endpoint: http://localhost:${PORT}/api/validators`);
-});
+// Only start server if this file is run directly (not imported)
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`🚀 Validator Analytics API running on port ${PORT}`);
+    console.log(`📡 Using Solana RPC: ${RPC_URL}`);
+    console.log(`🔍 API Documentation: http://localhost:${PORT}/`);
+    console.log(`⚡ Health Check: http://localhost:${PORT}/health`);
+    console.log(`🎯 Validators Endpoint: http://localhost:${PORT}/api/validators`);
+  });
+}
 
 export default app;
