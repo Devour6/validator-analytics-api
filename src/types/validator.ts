@@ -262,3 +262,113 @@ export interface ValidatorInfoProgramData {
   details?: string;
   keybaseUsername?: string;
 }
+
+// === Phase 1: Stakewiz + SVT Analytics Types ===
+
+/** Stakewiz validator metadata */
+export interface StakewizMetadata {
+  voteAccount: string;
+  name?: string;
+  description?: string;
+  website?: string;
+  iconUrl?: string;
+  /** Social media links */
+  social?: {
+    twitter?: string;
+    discord?: string;
+    telegram?: string;
+    github?: string;
+  };
+  /** Validator location/region */
+  location?: {
+    country?: string;
+    region?: string;
+    datacenter?: string;
+  };
+  /** Validator setup details */
+  setup?: {
+    hardware?: string;
+    software?: string;
+    uptime?: number;
+  };
+  /** Stakewiz-specific metrics */
+  stakewizScore?: number;
+  verified?: boolean;
+}
+
+/** SVT (Solana Validator Token) financial data */
+export interface SVTFinancialData {
+  voteAccount: string;
+  /** Annual Percentage Yield calculations */
+  apy: {
+    current: number;
+    average30d: number;
+    average90d: number;
+    average1y: number;
+  };
+  /** Financial performance metrics */
+  performance: {
+    totalRewards: number;
+    rewardsPerEpoch: number;
+    missedRewards: number;
+    efficiency: number; // percentage of potential rewards earned
+  };
+  /** Staking economics */
+  economics: {
+    totalStakeValue: number; // in SOL
+    totalStakeUSD: number;
+    projectedYearlyReturns: number; // in SOL
+    projectedYearlyReturnsUSD: number;
+  };
+  /** Risk assessment */
+  risk: {
+    delinquencyRate: number;
+    commissionStability: number;
+    uptimeScore: number;
+    riskScore: 'LOW' | 'MEDIUM' | 'HIGH';
+  };
+}
+
+/** Combined validator analytics response */
+export interface ValidatorAnalyticsV1 {
+  /** Basic validator info from on-chain data */
+  validator: ValidatorInfo;
+  /** Enhanced metadata from Stakewiz */
+  stakewiz?: StakewizMetadata;
+  /** Financial analytics from SVT */
+  svt?: SVTFinancialData;
+  /** Data freshness indicators */
+  dataTimestamps: {
+    validator: number;
+    stakewiz?: number;
+    svt?: number;
+  };
+  /** Response metadata */
+  meta: {
+    responseTimeMs: number;
+    dataSources: string[];
+    cached: boolean;
+  };
+}
+
+/** Validator Analytics V1 list response */
+export interface ValidatorAnalyticsV1Response {
+  validators: ValidatorAnalyticsV1[];
+  pagination: {
+    total: number;
+    limit: number;
+    offset: number;
+    hasNext: boolean;
+  };
+  aggregates: {
+    totalStake: number;
+    averageAPY: number;
+    averageCommission: number;
+    totalValidators: number;
+  };
+  meta: {
+    responseTimeMs: number;
+    epoch: number;
+    timestamp: number;
+  };
+}

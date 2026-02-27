@@ -11,6 +11,7 @@ import Joi from 'joi';
 import { createServer } from 'http';
 import { ValidatorService } from './services/validatorService';
 import { WebSocketService } from './services/websocketService';
+import { ValidatorAnalyticsService } from './services/validatorAnalyticsService';
 
 // Load environment variables
 dotenv.config();
@@ -24,6 +25,7 @@ const server = createServer(app);
 
 // Initialize services
 const validatorService = new ValidatorService(RPC_URL);
+const validatorAnalyticsService = new ValidatorAnalyticsService(RPC_URL);
 let websocketService: WebSocketService;
 
 // Rate limiting middleware
@@ -549,6 +551,126 @@ app.get('/api/websocket/status', (req, res) => {
   });
 });
 
+/**
+ * GET /api/validator-analytics/v1
+ * Phase 1 ENDPOINT: Enhanced validator analytics with Stakewiz metadata + SVT financial data
+ * 
+ * Query Parameters:
+ * - limit: Number of validators to return (1-100, default: 50)
+ * - offset: Starting position (default: 0)
+ * - sortBy: Sort field (stake|apy|commission|risk) (default: stake)
+ * - voteAccount: Specific validator vote account to analyze
+ * 
+ * Returns:
+ * {
+ *   validators: ValidatorAnalyticsV1[],
+ *   pagination: { total, limit, offset, hasNext },
+ *   aggregates: { totalStake, averageAPY, averageCommission, totalValidators },
+ *   meta: { responseTimeMs, epoch, timestamp }
+ * }
+ */
+app.get('/api/validator-analytics/v1', apiLimiter, async (req, res) => {
+  try {
+    const startTime = Date.now();
+    
+    // Extract and validate query parameters
+    const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
+    const offset = Math.max(parseInt(req.query.offset as string) || 0, 0);
+    const sortBy = (req.query.sortBy as string) || 'stake';
+    const voteAccount = req.query.voteAccount as string;
+    
+    // Validate sortBy parameter
+    const validSortFields = ['stake', 'apy', 'commission', 'risk'];
+    if (!validSortFields.includes(sortBy)) {
+      return res.status(400).json({
+        error: 'Invalid sortBy parameter',
+        message: `sortBy must be one of: ${validSortFields.join(', ')}`,
+        provided: sortBy,
+        timestamp: Date.now()
+      });
+    }
+
+    // Validate voteAccount if provided
+    if (voteAccount && (voteAccount.length < 32 || voteAccount.length > 44)) {
+      return res.status(400).json({
+        error: 'Invalid voteAccount parameter',
+        message: 'voteAccount must be a valid 32-44 character base58 string',
+        provided: voteAccount,
+        timestamp: Date.now()
+      });
+    }
+    
+    console.log(`Validator Analytics V1: limit=${limit}, offset=${offset}, sortBy=${sortBy}, voteAccount=${voteAccount}`);
+    
+    // Fetch enhanced validator analytics
+    const analyticsData = await validatorAnalyticsService.getValidatorAnalytics({
+      limit,
+      offset,
+      sortBy: sortBy as 'stake' | 'apy' | 'commission' | 'risk',
+      voteAccount
+    });
+    
+    const responseTime = Date.now() - startTime;
+    console.log(`Validator Analytics V1 response: ${analyticsData.validators.length} validators, ${responseTime}ms`);
+    
+    res.json(analyticsData);
+    
+  } catch (error) {
+    console.error('Error in /api/validator-analytics/v1:', error);
+    
+    let statusCode = 500;
+    let errorMessage = 'Failed to fetch validator analytics';
+    
+    if (error instanceof Error) {
+      if (error.message.includes('not found')) {
+        statusCode = 404;
+        errorMessage = error.message;
+      } else if (error.message.includes('Connection') || error.message.includes('timeout')) {
+        statusCode = 503;
+        errorMessage = 'Unable to connect to data sources. Please try again later.';
+      } else if (error.message.includes('Rate limit')) {
+        statusCode = 429;
+        errorMessage = 'Rate limit exceeded. Please try again later.';
+      }
+    }
+    
+    res.status(statusCode).json({
+      error: statusCode === 500 ? 'Internal Server Error' : 'Service Error',
+      message: errorMessage,
+      details: process.env.NODE_ENV === 'development' 
+        ? (error instanceof Error ? error.message : 'Unknown error')
+        : undefined,
+      timestamp: Date.now()
+    });
+  }
+});
+
+/**
+ * GET /api/validator-analytics/v1/health
+ * Health check for validator analytics data sources
+ */
+app.get('/api/validator-analytics/v1/health', async (req, res) => {
+  try {
+    const health = await validatorAnalyticsService.healthCheck();
+    const allHealthy = health.onChain && health.stakewiz && health.svt;
+    
+    res.status(allHealthy ? 200 : 503).json({
+      status: allHealthy ? 'healthy' : 'degraded',
+      service: 'validator-analytics-v1',
+      dataSources: health,
+      timestamp: Date.now()
+    });
+  } catch (error) {
+    console.error('Health check failed for validator analytics:', error);
+    res.status(503).json({
+      status: 'unhealthy',
+      service: 'validator-analytics-v1',
+      error: error instanceof Error ? error.message : 'Unknown error',
+      timestamp: Date.now()
+    });
+  }
+});
+
 // Root endpoint
 app.get('/', (req, res) => {
   res.json({
@@ -556,9 +678,13 @@ app.get('/', (req, res) => {
     version: '2.0.0',
     description: 'Solana validator analytics using on-chain data only - Deep Analytics',
     endpoints: {
-      // V1 Endpoints
+      // Core Endpoints
       '/health': 'Health check and RPC status',
       '/api/validators': 'Get validator data from on-chain sources',
+      
+      // V1 Revenue Product - Validator Analytics
+      '/api/validator-analytics/v1': 'Enhanced validator analytics with Stakewiz metadata + SVT financial data',
+      '/api/validator-analytics/v1/health': 'Health check for external data sources',
       
       // V2 Deep Analytics Endpoints
       '/api/validators/:voteAccount': 'Get detailed info for a single validator',
@@ -571,6 +697,13 @@ app.get('/', (req, res) => {
       '/ws': 'WebSocket endpoint for real-time validator updates'
     },
     features: {
+      v1: [
+        'Stakewiz validator metadata integration',
+        'SVT financial data and APY calculations',
+        'Risk assessment and scoring',
+        'Enhanced validator analytics dashboard',
+        'Multi-source data aggregation'
+      ],
       v2: [
         'Single validator detail views with APY estimates',
         'Historical epoch-by-epoch performance tracking',
