@@ -78,8 +78,8 @@ const validatorQuerySchema = Joi.object({
 });
 
 // V2 validation schemas
-const voteAccountSchema = Joi.string().length(44).pattern(/^[1-9A-HJ-NP-Za-km-z]+$/).required(); // Valid base58 characters and length
-const walletAddressSchema = Joi.string().length(44).pattern(/^[1-9A-HJ-NP-Za-km-z]+$/).required();
+const voteAccountSchema = Joi.string().min(32).max(44).pattern(/^[1-9A-HJ-NP-Za-km-z]+$/).required(); // Valid base58 characters, 32-44 chars
+const walletAddressSchema = Joi.string().min(32).max(44).pattern(/^[1-9A-HJ-NP-Za-km-z]+$/).required();
 
 // Validation middleware
 const validateQuery = (schema: Joi.ObjectSchema) => {
@@ -279,7 +279,7 @@ app.get('/api/validators/:voteAccount', apiLimiter, async (req, res) => {
     if (error) {
       return res.status(400).json({
         error: 'Invalid Vote Account',
-        message: 'Vote account must be a valid 44-character base58 string',
+        message: 'Vote account must be a valid 32-44 character base58 string',
         details: error.details[0].message,
         timestamp: Date.now()
       });
@@ -346,7 +346,7 @@ app.get('/api/validators/:voteAccount/history', apiLimiter, async (req, res) => 
     if (error) {
       return res.status(400).json({
         error: 'Invalid Vote Account',
-        message: 'Vote account must be a valid 44-character base58 string',
+        message: 'Vote account must be a valid 32-44 character base58 string',
         details: error.details[0].message,
         timestamp: Date.now()
       });
@@ -461,7 +461,7 @@ app.get('/api/stake-accounts/:wallet', apiLimiter, async (req, res) => {
     if (error) {
       return res.status(400).json({
         error: 'Invalid Wallet Address',
-        message: 'Wallet address must be a valid 44-character base58 string',
+        message: 'Wallet address must be a valid 32-44 character base58 string',
         details: error.details[0].message,
         timestamp: Date.now()
       });

@@ -90,7 +90,7 @@ describe('V2 Deep Analytics Endpoints', () => {
 
       expect(response.body).toMatchObject({
         error: 'Invalid Vote Account',
-        message: expect.stringContaining('valid 44-character base58 string'),
+        message: expect.stringContaining('valid 32-44 character base58 string'),
         timestamp: expect.any(Number)
       });
     });
@@ -180,7 +180,7 @@ describe('V2 Deep Analytics Endpoints', () => {
 
       expect(response.body).toMatchObject({
         error: 'Invalid Vote Account',
-        message: expect.stringContaining('valid 44-character base58 string'),
+        message: expect.stringContaining('valid 32-44 character base58 string'),
         timestamp: expect.any(Number)
       });
     });
@@ -269,7 +269,7 @@ describe('V2 Deep Analytics Endpoints', () => {
 
       expect(response.body).toMatchObject({
         error: 'Invalid Wallet Address',
-        message: expect.stringContaining('valid 44-character base58 string'),
+        message: expect.stringContaining('valid 32-44 character base58 string'),
         timestamp: expect.any(Number)
       });
     });
