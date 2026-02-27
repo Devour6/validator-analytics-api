@@ -18,7 +18,11 @@ import {
   ValidatorHistoryData,
   CurrentEpochInfo,
   StakeAccount,
-  WalletStakeAccountsResponse
+  WalletStakeAccountsResponse,
+  NetworkStats,
+  ValidatorComparisonResponse,
+  TopValidatorsResponse,
+  DelinquentAlertsResponse
 } from '../types/validator';
 
 export class ValidatorService {
@@ -713,5 +717,375 @@ export class ValidatorService {
     const epochsPerYear = 365.25 * 24 * 60 * 60 / (432000 * 0.4); // Approximate
     
     return Math.floor(stakeAmount * (annualRewardRate / epochsPerYear));
+  }
+
+  // New Aggregation Methods
+
+  /**
+   * Get network-wide staking statistics
+   */
+  async getNetworkStats(): Promise<import('../types/validator').NetworkStats> {
+    try {
+      console.log('Fetching network statistics...');
+      
+      // Get current epoch info
+      const epochInfo = await this.connection.getEpochInfo();
+      
+      // Get all vote accounts
+      const voteAccounts = await this.connection.getVoteAccounts();
+      
+      const activeValidators = voteAccounts.current?.length || 0;
+      const delinquentValidators = voteAccounts.delinquent?.length || 0;
+      const totalValidators = activeValidators + delinquentValidators;
+      
+      // Calculate total stake
+      const totalStake = (voteAccounts.current || []).reduce(
+        (sum, validator) => sum + validator.activatedStake, 0
+      ) + (voteAccounts.delinquent || []).reduce(
+        (sum, validator) => sum + validator.activatedStake, 0
+      );
+      
+      const averageStake = totalValidators > 0 ? totalStake / totalValidators : 0;
+      
+      // Calculate Nakamoto coefficient (validators needed for 33% stake)
+      const sortedValidators = [...(voteAccounts.current || []), ...(voteAccounts.delinquent || [])]
+        .sort((a, b) => b.activatedStake - a.activatedStake);
+      
+      const targetStake = totalStake * 0.33;
+      let accumulatedStake = 0;
+      let nakamotoCoefficient = 0;
+      
+      for (const validator of sortedValidators) {
+        accumulatedStake += validator.activatedStake;
+        nakamotoCoefficient++;
+        if (accumulatedStake >= targetStake) {
+          break;
+        }
+      }
+      
+      // Calculate network APY estimate (simplified)
+      const networkAPY = 7.0; // Base estimate, could be calculated from actual rewards
+      
+      // Calculate epoch progress
+      const epochProgress = epochInfo.slotsInEpoch > 0 
+        ? (epochInfo.slotIndex / epochInfo.slotsInEpoch) * 100 
+        : 0;
+      
+      return {
+        totalValidators,
+        activeValidators,
+        delinquentValidators,
+        totalStake,
+        averageStake,
+        networkAPY,
+        nakamotoCoefficient,
+        epoch: epochInfo.epoch,
+        slotsInEpoch: epochInfo.slotsInEpoch,
+        slotIndex: epochInfo.slotIndex,
+        epochProgress,
+        timestamp: Date.now()
+      };
+      
+    } catch (error) {
+      console.error('Error fetching network stats:', error);
+      throw new Error(`Failed to fetch network statistics: ${error}`);
+    }
+  }
+
+  /**
+   * Compare multiple validators side by side
+   */
+  async compareValidators(voteAccounts: string[]): Promise<import('../types/validator').ValidatorComparisonResponse> {
+    try {
+      console.log(`Comparing ${voteAccounts.length} validators...`);
+      const startTime = Date.now();
+      
+      // Get epoch info for calculations
+      const epochInfo = await this.connection.getEpochInfo();
+      
+      // Get all vote accounts for context
+      const allVoteAccounts = await this.connection.getVoteAccounts();
+      const allValidators = [...(allVoteAccounts.current || []), ...(allVoteAccounts.delinquent || [])];
+      
+      // Get validator names
+      const validatorInfoMap = await this.fetchValidatorInfoBatch(voteAccounts);
+      
+      // Phase validator addresses (hardcoded)
+      const phaseValidators = new Set([
+        // Add Phase validator vote accounts here when known
+        'PhaseZkVtXkkLvH3PL4QGzPYkZYGqzfCGTkfSF4YE7', // Example
+      ]);
+      
+      const validators: import('../types/validator').ValidatorComparison[] = [];
+      const notFound: string[] = [];
+      
+      for (const voteAccount of voteAccounts) {
+        const validator = allValidators.find(v => v.votePubkey === voteAccount);
+        
+        if (!validator) {
+          notFound.push(voteAccount);
+          continue;
+        }
+        
+        // Calculate performance metrics
+        const { estimatedApy, skipRate } = this.calculatePerformanceMetrics(
+          validator.epochCredits || [], 
+          epochInfo
+        );
+        
+        // Calculate uptime (simplified based on epoch credits)
+        const uptime = validator.epochCredits && validator.epochCredits.length > 0 ? 95 : 0;
+        
+        // Calculate performance score (0-100)
+        const performanceScore = this.calculateValidatorPerformanceScore(
+          estimatedApy, 
+          uptime, 
+          skipRate, 
+          validator.commission
+        );
+        
+        const isDelinquent = (allVoteAccounts.delinquent || []).some(v => v.votePubkey === voteAccount);
+        
+        validators.push({
+          voteAccount,
+          name: validatorInfoMap.get(voteAccount) || null,
+          commission: validator.commission,
+          apy: estimatedApy,
+          uptime,
+          skipRate,
+          stake: validator.activatedStake,
+          performanceScore,
+          isPhaseValidator: phaseValidators.has(voteAccount),
+          lastVote: (validator as any).lastVote || null,
+          isDelinquent
+        });
+      }
+      
+      // Sort by performance score (descending)
+      validators.sort((a, b) => b.performanceScore - a.performanceScore);
+      
+      const responseTime = Date.now() - startTime;
+      
+      return {
+        validators,
+        notFound,
+        epoch: epochInfo.epoch,
+        timestamp: Date.now(),
+        meta: {
+          responseTimeMs: responseTime,
+          requestedCount: voteAccounts.length,
+          foundCount: validators.length
+        }
+      };
+      
+    } catch (error) {
+      console.error('Error comparing validators:', error);
+      throw new Error(`Failed to compare validators: ${error}`);
+    }
+  }
+
+  /**
+   * Get top validators leaderboard
+   */
+  async getTopValidators(
+    sortBy: 'apy' | 'uptime' | 'stake' = 'apy',
+    limit: number = 20
+  ): Promise<import('../types/validator').TopValidatorsResponse> {
+    try {
+      console.log(`Fetching top ${limit} validators sorted by ${sortBy}...`);
+      const startTime = Date.now();
+      
+      // Get all validators
+      const validatorData = await this.getValidators();
+      const epochInfo = await this.connection.getEpochInfo();
+      
+      // Phase validator addresses (hardcoded)
+      const phaseValidators = new Set([
+        // Add Phase validator vote accounts here when known
+        'PhaseZkVtXkkLvH3PL4QGzPYkZYGqzfCGTkfSF4YE7', // Example
+      ]);
+      
+      // Calculate metrics for all validators
+      const validatorsWithMetrics = validatorData.validators.map((validator, index) => {
+        const { estimatedApy, skipRate } = this.calculatePerformanceMetrics(
+          validator.epochCredits || [], 
+          epochInfo
+        );
+        
+        // Simple uptime calculation based on whether validator is active
+        const uptime = validator.epochVoteAccount ? 98 : 0;
+        
+        // Simple stake growth calculation (would need historical data for accuracy)
+        const stakeGrowth = Math.random() * 10 - 5; // Placeholder: -5% to +5%
+        
+        const performanceScore = this.calculateValidatorPerformanceScore(
+          estimatedApy,
+          uptime,
+          skipRate,
+          validator.commission
+        );
+        
+        return {
+          voteAccount: validator.identity,
+          name: validator.name,
+          commission: validator.commission,
+          apy: estimatedApy,
+          uptime,
+          stake: validator.stake,
+          stakeGrowth,
+          performanceScore,
+          isPhaseValidator: phaseValidators.has(validator.identity),
+          rank: 0 // Will be set after sorting
+        };
+      });
+      
+      // Sort based on criteria
+      let sortFn: (a: any, b: any) => number;
+      switch (sortBy) {
+        case 'uptime':
+          sortFn = (a, b) => b.uptime - a.uptime;
+          break;
+        case 'stake':
+          sortFn = (a, b) => b.stake - a.stake;
+          break;
+        case 'apy':
+        default:
+          sortFn = (a, b) => b.apy - a.apy;
+          break;
+      }
+      
+      const sortedValidators = validatorsWithMetrics.sort(sortFn);
+      
+      // Set rankings and limit results
+      const topValidators = sortedValidators.slice(0, limit).map((validator, index) => ({
+        ...validator,
+        rank: index + 1
+      }));
+      
+      const phaseValidatorCount = topValidators.filter(v => v.isPhaseValidator).length;
+      const responseTime = Date.now() - startTime;
+      
+      return {
+        validators: topValidators,
+        sortBy,
+        limit,
+        epoch: epochInfo.epoch,
+        timestamp: Date.now(),
+        meta: {
+          responseTimeMs: responseTime,
+          totalValidators: validatorData.totalValidators,
+          phaseValidators: phaseValidatorCount
+        }
+      };
+      
+    } catch (error) {
+      console.error('Error fetching top validators:', error);
+      throw new Error(`Failed to fetch top validators: ${error}`);
+    }
+  }
+
+  /**
+   * Get currently delinquent validators
+   */
+  async getDelinquentValidators(): Promise<import('../types/validator').DelinquentAlertsResponse> {
+    try {
+      console.log('Fetching delinquent validators...');
+      const startTime = Date.now();
+      
+      // Get current slot and epoch info
+      const currentSlot = await this.connection.getSlot();
+      const epochInfo = await this.connection.getEpochInfo();
+      
+      // Get all vote accounts
+      const voteAccounts = await this.connection.getVoteAccounts();
+      const delinquentVoteAccounts = voteAccounts.delinquent || [];
+      
+      // Get validator names
+      const voteAccountPubkeys = delinquentVoteAccounts.map(v => v.votePubkey);
+      const validatorInfoMap = await this.fetchValidatorInfoBatch(voteAccountPubkeys);
+      
+      // Phase validator addresses
+      const phaseValidators = new Set([
+        // Add Phase validator vote accounts here when known
+        'PhaseZkVtXkkLvH3PL4QGzPYkZYGqzfCGTkfSF4YE7', // Example
+      ]);
+      
+      const delinquentValidators: import('../types/validator').DelinquentValidator[] = delinquentVoteAccounts.map(validator => {
+        const lastVote = (validator as any).lastVote || null;
+        const slotsSinceLastVote = lastVote ? currentSlot - lastVote : 0;
+        
+        // Estimate time: ~400ms per slot on average
+        const minutesSinceLastVote = Math.floor((slotsSinceLastVote * 0.4) / 60);
+        
+        return {
+          voteAccount: validator.votePubkey,
+          name: validatorInfoMap.get(validator.votePubkey) || null,
+          lastVote,
+          slotsSinceLastVote,
+          minutesSinceLastVote,
+          stakeAtRisk: validator.activatedStake,
+          commission: validator.commission,
+          isPhaseValidator: phaseValidators.has(validator.votePubkey)
+        };
+      });
+      
+      const totalStakeAtRisk = delinquentValidators.reduce(
+        (sum, validator) => sum + validator.stakeAtRisk, 0
+      );
+      
+      const phaseValidatorsDelinquent = delinquentValidators.filter(
+        v => v.isPhaseValidator
+      ).length;
+      
+      const responseTime = Date.now() - startTime;
+      
+      return {
+        delinquentValidators,
+        totalDelinquent: delinquentValidators.length,
+        totalStakeAtRisk,
+        currentSlot,
+        epoch: epochInfo.epoch,
+        timestamp: Date.now(),
+        meta: {
+          responseTimeMs: responseTime,
+          phaseValidatorsDelinquent
+        }
+      };
+      
+    } catch (error) {
+      console.error('Error fetching delinquent validators:', error);
+      throw new Error(`Failed to fetch delinquent validators: ${error}`);
+    }
+  }
+
+  /**
+   * Calculate validator performance score (0-100)
+   */
+  private calculateValidatorPerformanceScore(
+    apy: number,
+    uptime: number,
+    skipRate: number,
+    commission: number
+  ): number {
+    // Weight factors
+    const apyWeight = 0.3;
+    const uptimeWeight = 0.4;
+    const skipRateWeight = 0.2;
+    const commissionWeight = 0.1;
+    
+    // Normalize values to 0-100 scale
+    const normalizedAPY = Math.min((apy / 10) * 100, 100); // Max APY of 10%
+    const normalizedUptime = uptime; // Already 0-100
+    const normalizedSkipRate = Math.max(0, 100 - skipRate); // Invert skip rate
+    const normalizedCommission = Math.max(0, 100 - commission); // Lower commission is better
+    
+    const score = (
+      normalizedAPY * apyWeight +
+      normalizedUptime * uptimeWeight +
+      normalizedSkipRate * skipRateWeight +
+      normalizedCommission * commissionWeight
+    );
+    
+    return Math.round(Math.max(0, Math.min(100, score)));
   }
 }

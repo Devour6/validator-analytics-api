@@ -21,6 +21,15 @@ PublicKey.findProgramAddressSync = jest.fn(() => ['mockValidatorInfoAccount', 0]
 describe('ValidatorService', () => {
   let validatorService: ValidatorService;
   let mockConnection: jest.Mocked<Connection>;
+  
+  afterAll(async () => {
+    // Clear all timers and mocks
+    jest.clearAllTimers();
+    jest.clearAllMocks();
+    
+    // Give time for cleanup
+    await new Promise(resolve => setTimeout(resolve, 50));
+  });
 
   beforeEach(() => {
     // Clear all mocks

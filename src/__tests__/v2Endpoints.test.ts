@@ -14,6 +14,14 @@ describe('V2 Deep Analytics Endpoints', () => {
   let VALID_VOTE_ACCOUNT: string;
   const VALID_WALLET = '2BVLdp8XGQeBiLpT5fhJN9W5dxdH6fFdPqJU7z8HN9Mv';
   const INVALID_PUBKEY = 'invalid_key';
+  
+  afterAll(async () => {
+    // Clear all timers to prevent hanging
+    jest.clearAllTimers();
+    
+    // Give time for cleanup
+    await new Promise(resolve => setTimeout(resolve, 50));
+  });
 
   beforeAll(async () => {
     // Get a real validator from the main endpoint to use in tests

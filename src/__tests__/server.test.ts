@@ -27,6 +27,15 @@ describe('API Endpoints', () => {
     mockHealthCheck.mockReset();
     mockGetValidators.mockReset();
   });
+  
+  afterAll(async () => {
+    // Clear all timers and mocks
+    jest.clearAllTimers();
+    jest.clearAllMocks();
+    
+    // Give time for cleanup
+    await new Promise(resolve => setTimeout(resolve, 50));
+  });
 
   describe('GET /', () => {
     it('should return service information', async () => {

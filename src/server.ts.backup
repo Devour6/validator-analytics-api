@@ -261,220 +261,6 @@ app.get('/api/validators', apiLimiter, validateQuery(validatorQuerySchema), asyn
 });
 
 /**
- * GET /api/validators/compare?validators=A,B,C
- * Compare up to 5 validators side by side
- * 
- * Query Parameters:
- * - validators: Comma-separated list of vote account addresses (max 5)
- * 
- * Returns comparison data including:
- * - Commission, APY, uptime, skip rate, stake
- * - Ranked by performance score
- * - Phase validators flagged
- */
-app.get('/api/validators/compare', apiLimiter, async (req, res) => {
-  try {
-    const validatorsParam = req.query.validators as string;
-    
-    if (!validatorsParam) {
-      return res.status(400).json({
-        error: 'Missing Required Parameter',
-        message: 'validators parameter is required',
-        example: '/api/validators/compare?validators=vote1,vote2,vote3',
-        timestamp: Date.now()
-      });
-    }
-    
-    const voteAccounts = validatorsParam.split(',').map(v => v.trim()).filter(v => v.length > 0);
-    
-    if (voteAccounts.length === 0) {
-      return res.status(400).json({
-        error: 'Invalid Parameter',
-        message: 'No valid vote accounts provided',
-        timestamp: Date.now()
-      });
-    }
-    
-    if (voteAccounts.length > 5) {
-      return res.status(400).json({
-        error: 'Too Many Validators',
-        message: 'Maximum 5 validators can be compared at once',
-        provided: voteAccounts.length,
-        timestamp: Date.now()
-      });
-    }
-    
-    // Validate vote account format
-    const invalidVoteAccounts = voteAccounts.filter(account => 
-      account.length < 32 || account.length > 44 || !/^[1-9A-HJ-NP-Za-km-z]+$/.test(account)
-    );
-    
-    if (invalidVoteAccounts.length > 0) {
-      return res.status(400).json({
-        error: 'Invalid Vote Account Format',
-        message: 'Vote accounts must be valid 32-44 character base58 strings',
-        invalidAccounts: invalidVoteAccounts,
-        timestamp: Date.now()
-      });
-    }
-    
-    console.log(`Comparing ${voteAccounts.length} validators...`);
-    const startTime = Date.now();
-    
-    const comparison = await validatorService.compareValidators(voteAccounts);
-    
-    const responseTime = Date.now() - startTime;
-    console.log(`Validator comparison response: ${comparison.validators.length} validators, ${responseTime}ms`);
-    
-    res.json({
-      ...comparison,
-      meta: {
-        ...comparison.meta,
-        responseTimeMs: responseTime
-      }
-    });
-    
-  } catch (error) {
-    console.error('Error in /api/validators/compare:', error);
-    
-    let statusCode = 500;
-    let errorMessage = 'Failed to compare validators';
-    
-    if (error instanceof Error) {
-      if (error.message.includes('Connection') || error.message.includes('timeout')) {
-        statusCode = 503;
-        errorMessage = 'Unable to connect to Solana RPC';
-      }
-    }
-    
-    res.status(statusCode).json({
-      error: 'Service Error',
-      message: errorMessage,
-      timestamp: Date.now()
-    });
-  }
-});
-
-/**
- * GET /api/validators/top
- * Top validators leaderboard
- * 
- * Query Parameters:
- * - sort: Sort criteria (apy|uptime|stake) (default: apy)
- * - limit: Number of validators to return (1-100, default: 20)
- * 
- * Returns leaderboard with:
- * - Top validators by specified criteria
- * - Phase validators flagged
- * - Performance scores and rankings
- */
-app.get('/api/validators/top', apiLimiter, async (req, res) => {
-  try {
-    const sortBy = (req.query.sort as string) || 'apy';
-    const parsedLimit = parseInt(req.query.limit as string);
-    const limit = Math.min(Math.max(isNaN(parsedLimit) ? 20 : parsedLimit, 1), 100);
-    
-    // Validate sort parameter
-    const validSortFields = ['apy', 'uptime', 'stake'];
-    if (!validSortFields.includes(sortBy)) {
-      return res.status(400).json({
-        error: 'Invalid Sort Parameter',
-        message: `sort must be one of: ${validSortFields.join(', ')}`,
-        provided: sortBy,
-        timestamp: Date.now()
-      });
-    }
-    
-    console.log(`Fetching top ${limit} validators sorted by ${sortBy}...`);
-    const startTime = Date.now();
-    
-    const topValidators = await validatorService.getTopValidators(
-      sortBy as 'apy' | 'uptime' | 'stake',
-      limit
-    );
-    
-    const responseTime = Date.now() - startTime;
-    console.log(`Top validators response: ${topValidators.validators.length} validators, ${responseTime}ms`);
-    
-    res.json({
-      ...topValidators,
-      meta: {
-        ...topValidators.meta,
-        responseTimeMs: responseTime
-      }
-    });
-    
-  } catch (error) {
-    console.error('Error in /api/validators/top:', error);
-    
-    let statusCode = 500;
-    let errorMessage = 'Failed to fetch top validators';
-    
-    if (error instanceof Error) {
-      if (error.message.includes('Connection') || error.message.includes('timeout')) {
-        statusCode = 503;
-        errorMessage = 'Unable to connect to Solana RPC';
-      }
-    }
-    
-    res.status(statusCode).json({
-      error: 'Service Error',
-      message: errorMessage,
-      timestamp: Date.now()
-    });
-  }
-});
-
-/**
- * GET /api/alerts/delinquent
- * Currently delinquent validators alert system
- * 
- * Returns alerts for validators that are currently delinquent:
- * - List of delinquent validators with last vote slot
- * - How long they've been delinquent
- * - Their total stake at risk
- * - Phase validators highlighted
- */
-app.get('/api/alerts/delinquent', apiLimiter, async (req, res) => {
-  try {
-    console.log('Fetching delinquent validator alerts...');
-    const startTime = Date.now();
-    
-    const delinquentAlerts = await validatorService.getDelinquentValidators();
-    
-    const responseTime = Date.now() - startTime;
-    console.log(`Delinquent alerts response: ${delinquentAlerts.delinquentValidators.length} validators, ${responseTime}ms`);
-    
-    res.json({
-      ...delinquentAlerts,
-      meta: {
-        ...delinquentAlerts.meta,
-        responseTimeMs: responseTime
-      }
-    });
-    
-  } catch (error) {
-    console.error('Error in /api/alerts/delinquent:', error);
-    
-    let statusCode = 500;
-    let errorMessage = 'Failed to fetch delinquent validator alerts';
-    
-    if (error instanceof Error) {
-      if (error.message.includes('Connection') || error.message.includes('timeout')) {
-        statusCode = 503;
-        errorMessage = 'Unable to connect to Solana RPC';
-      }
-    }
-    
-    res.status(statusCode).json({
-      error: 'Service Error',
-      message: errorMessage,
-      timestamp: Date.now()
-    });
-  }
-});
-
-/**
  * GET /api/validators/:voteAccount
  * V2 ENDPOINT: Single validator detail view
  * 
@@ -796,6 +582,219 @@ app.get('/api/network/stats', apiLimiter, async (req, res) => {
     
     let statusCode = 500;
     let errorMessage = 'Failed to fetch network statistics';
+    
+    if (error instanceof Error) {
+      if (error.message.includes('Connection') || error.message.includes('timeout')) {
+        statusCode = 503;
+        errorMessage = 'Unable to connect to Solana RPC';
+      }
+    }
+    
+    res.status(statusCode).json({
+      error: 'Service Error',
+      message: errorMessage,
+      timestamp: Date.now()
+    });
+  }
+});
+
+/**
+ * GET /api/validators/compare?validators=A,B,C
+ * Compare up to 5 validators side by side
+ * 
+ * Query Parameters:
+ * - validators: Comma-separated list of vote account addresses (max 5)
+ * 
+ * Returns comparison data including:
+ * - Commission, APY, uptime, skip rate, stake
+ * - Ranked by performance score
+ * - Phase validators flagged
+ */
+app.get('/api/validators/compare', apiLimiter, async (req, res) => {
+  try {
+    const validatorsParam = req.query.validators as string;
+    
+    if (!validatorsParam) {
+      return res.status(400).json({
+        error: 'Missing Required Parameter',
+        message: 'validators parameter is required',
+        example: '/api/validators/compare?validators=vote1,vote2,vote3',
+        timestamp: Date.now()
+      });
+    }
+    
+    const voteAccounts = validatorsParam.split(',').map(v => v.trim()).filter(v => v.length > 0);
+    
+    if (voteAccounts.length === 0) {
+      return res.status(400).json({
+        error: 'Invalid Parameter',
+        message: 'No valid vote accounts provided',
+        timestamp: Date.now()
+      });
+    }
+    
+    if (voteAccounts.length > 5) {
+      return res.status(400).json({
+        error: 'Too Many Validators',
+        message: 'Maximum 5 validators can be compared at once',
+        provided: voteAccounts.length,
+        timestamp: Date.now()
+      });
+    }
+    
+    // Validate vote account format
+    const invalidVoteAccounts = voteAccounts.filter(account => 
+      account.length < 32 || account.length > 44 || !/^[1-9A-HJ-NP-Za-km-z]+$/.test(account)
+    );
+    
+    if (invalidVoteAccounts.length > 0) {
+      return res.status(400).json({
+        error: 'Invalid Vote Account Format',
+        message: 'Vote accounts must be valid 32-44 character base58 strings',
+        invalidAccounts: invalidVoteAccounts,
+        timestamp: Date.now()
+      });
+    }
+    
+    console.log(`Comparing ${voteAccounts.length} validators...`);
+    const startTime = Date.now();
+    
+    const comparison = await validatorService.compareValidators(voteAccounts);
+    
+    const responseTime = Date.now() - startTime;
+    console.log(`Validator comparison response: ${comparison.validators.length} validators, ${responseTime}ms`);
+    
+    res.json({
+      ...comparison,
+      meta: {
+        ...comparison.meta,
+        responseTimeMs: responseTime
+      }
+    });
+    
+  } catch (error) {
+    console.error('Error in /api/validators/compare:', error);
+    
+    let statusCode = 500;
+    let errorMessage = 'Failed to compare validators';
+    
+    if (error instanceof Error) {
+      if (error.message.includes('Connection') || error.message.includes('timeout')) {
+        statusCode = 503;
+        errorMessage = 'Unable to connect to Solana RPC';
+      }
+    }
+    
+    res.status(statusCode).json({
+      error: 'Service Error',
+      message: errorMessage,
+      timestamp: Date.now()
+    });
+  }
+});
+
+/**
+ * GET /api/validators/top
+ * Top validators leaderboard
+ * 
+ * Query Parameters:
+ * - sort: Sort criteria (apy|uptime|stake) (default: apy)
+ * - limit: Number of validators to return (1-100, default: 20)
+ * 
+ * Returns leaderboard with:
+ * - Top validators by specified criteria
+ * - Phase validators flagged
+ * - Performance scores and rankings
+ */
+app.get('/api/validators/top', apiLimiter, async (req, res) => {
+  try {
+    const sortBy = (req.query.sort as string) || 'apy';
+    const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 20, 1), 100);
+    
+    // Validate sort parameter
+    const validSortFields = ['apy', 'uptime', 'stake'];
+    if (!validSortFields.includes(sortBy)) {
+      return res.status(400).json({
+        error: 'Invalid Sort Parameter',
+        message: `sort must be one of: ${validSortFields.join(', ')}`,
+        provided: sortBy,
+        timestamp: Date.now()
+      });
+    }
+    
+    console.log(`Fetching top ${limit} validators sorted by ${sortBy}...`);
+    const startTime = Date.now();
+    
+    const topValidators = await validatorService.getTopValidators(
+      sortBy as 'apy' | 'uptime' | 'stake',
+      limit
+    );
+    
+    const responseTime = Date.now() - startTime;
+    console.log(`Top validators response: ${topValidators.validators.length} validators, ${responseTime}ms`);
+    
+    res.json({
+      ...topValidators,
+      meta: {
+        ...topValidators.meta,
+        responseTimeMs: responseTime
+      }
+    });
+    
+  } catch (error) {
+    console.error('Error in /api/validators/top:', error);
+    
+    let statusCode = 500;
+    let errorMessage = 'Failed to fetch top validators';
+    
+    if (error instanceof Error) {
+      if (error.message.includes('Connection') || error.message.includes('timeout')) {
+        statusCode = 503;
+        errorMessage = 'Unable to connect to Solana RPC';
+      }
+    }
+    
+    res.status(statusCode).json({
+      error: 'Service Error',
+      message: errorMessage,
+      timestamp: Date.now()
+    });
+  }
+});
+
+/**
+ * GET /api/alerts/delinquent
+ * Currently delinquent validators alert system
+ * 
+ * Returns alerts for validators that are currently delinquent:
+ * - List of delinquent validators with last vote slot
+ * - How long they've been delinquent
+ * - Their total stake at risk
+ * - Phase validators highlighted
+ */
+app.get('/api/alerts/delinquent', apiLimiter, async (req, res) => {
+  try {
+    console.log('Fetching delinquent validator alerts...');
+    const startTime = Date.now();
+    
+    const delinquentAlerts = await validatorService.getDelinquentValidators();
+    
+    const responseTime = Date.now() - startTime;
+    console.log(`Delinquent alerts response: ${delinquentAlerts.delinquentValidators.length} validators, ${responseTime}ms`);
+    
+    res.json({
+      ...delinquentAlerts,
+      meta: {
+        ...delinquentAlerts.meta,
+        responseTimeMs: responseTime
+      }
+    });
+    
+  } catch (error) {
+    console.error('Error in /api/alerts/delinquent:', error);
+    
+    let statusCode = 500;
+    let errorMessage = 'Failed to fetch delinquent validator alerts';
     
     if (error instanceof Error) {
       if (error.message.includes('Connection') || error.message.includes('timeout')) {
