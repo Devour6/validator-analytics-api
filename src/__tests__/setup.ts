@@ -22,8 +22,24 @@ beforeAll(() => {
   console.log = jest.fn();
 });
 
-afterAll(() => {
+afterAll(async () => {
   console.error = originalError;
   console.warn = originalWarn;
   console.log = originalLog;
+  
+  // Clear all timers to prevent Jest from hanging
+  jest.clearAllTimers();
+  jest.clearAllMocks();
+  
+  // Force close any remaining handles
+  if ((global as any).__GLOBAL_TEST_SERVER__) {
+    try {
+      await (global as any).__GLOBAL_TEST_SERVER__.stop();
+    } catch (error) {
+      console.error('Error stopping test server:', error);
+    }
+  }
+  
+  // Give a moment for cleanup
+  await new Promise(resolve => setTimeout(resolve, 100));
 });

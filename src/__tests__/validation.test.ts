@@ -13,6 +13,14 @@ const validatorQuerySchema = Joi.object({
 });
 
 describe('Input Validation', () => {
+  afterAll(async () => {
+    // Clear all timers
+    jest.clearAllTimers();
+    
+    // Give time for cleanup
+    await new Promise(resolve => setTimeout(resolve, 50));
+  });
+  
   describe('Validator Query Schema', () => {
     it('should validate valid parameters', () => {
       const validInputs = [

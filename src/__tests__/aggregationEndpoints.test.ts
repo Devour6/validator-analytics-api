@@ -4,11 +4,66 @@
  */
 
 import request from 'supertest';
+import { Server } from 'http';
 import app from '../server';
 
 describe('Aggregation Endpoints', () => {
   // Increase timeout for network requests
   jest.setTimeout(30000);
+  
+  let server: Server;
+  let connections: Set<any> = new Set();
+  
+  beforeAll(async () => {
+    // Start server for testing
+    server = await new Promise((resolve, reject) => {
+      const s = app.listen(0, (err?: Error) => {
+        if (err) reject(err);
+        else resolve(s);
+      });
+    });
+    
+    // Track connections to force close them
+    server.on('connection', (connection) => {
+      connections.add(connection);
+      connection.on('close', () => {
+        connections.delete(connection);
+      });
+    });
+    
+    (global as any).__GLOBAL_TEST_SERVER__ = { 
+      stop: async () => {
+        // Force close all connections
+        connections.forEach(connection => connection.destroy());
+        connections.clear();
+        
+        if (server) {
+          await new Promise<void>((resolve) => {
+            server.close(() => resolve());
+          });
+        }
+      }
+    };
+  });
+  
+  afterAll(async () => {
+    // Force close all connections first
+    connections.forEach(connection => connection.destroy());
+    connections.clear();
+    
+    // Clean up server
+    if (server) {
+      await new Promise<void>((resolve) => {
+        server.close(() => resolve());
+      });
+    }
+    
+    // Clear any remaining timers
+    jest.clearAllTimers();
+    
+    // Give time for cleanup
+    await new Promise(resolve => setTimeout(resolve, 200));
+  });
 
   describe('GET /api/network/stats', () => {
     it('should return network-wide statistics', async () => {

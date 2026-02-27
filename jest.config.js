@@ -16,4 +16,5 @@ module.exports = {
   setupFilesAfterEnv: ['<rootDir>/src/__tests__/setup.ts'],
   testTimeout: 30000,
   maxWorkers: 1, // Prevent RPC rate limiting during tests
+  forceExit: true, // Force Jest to exit after tests complete
 };
