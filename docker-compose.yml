@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  # Redis Cache Service
+  redis:
+    image: redis:7-alpine
+    container_name: validator-analytics-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - validator-analytics
+
+  # Validator Analytics API Service
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: validator-analytics-api
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - SOLANA_RPC_URL=${SOLANA_RPC_URL:-https://api.mainnet-beta.solana.com}
+      - REDIS_URL=redis://redis:6379
+      - CORS_ORIGIN=*
+      - REQUEST_TIMEOUT=30000
+      - LOG_LEVEL=info
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - validator-analytics
+
+volumes:
+  redis-data:
+    driver: local
+
+networks:
+  validator-analytics:
+    driver: bridge
