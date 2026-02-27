@@ -4,6 +4,7 @@
  */
 
 import { createClient, RedisClientType } from 'redis';
+import { logger } from '../utils/logger';
 
 /**
  * Cache key configuration constants
@@ -38,21 +39,22 @@ export enum CacheKeys {
 }
 
 export interface CacheTTLs {
-  [CacheKeys.VALIDATORS]: 300; // 5 minutes
-  [CacheKeys.VALIDATOR_DETAIL]: 120; // 2 minutes
-  [CacheKeys.EPOCH_INFO]: 30; // 30 seconds
-  [CacheKeys.NETWORK_STATS]: 300; // 5 minutes
-  [CacheKeys.VALIDATOR_HISTORY]: 600; // 10 minutes
-  [CacheKeys.WALLET_STAKE_ACCOUNTS]: 180; // 3 minutes
+  [CacheKeys.VALIDATORS]: number;
+  [CacheKeys.VALIDATOR_DETAIL]: number;
+  [CacheKeys.EPOCH_INFO]: number;
+  [CacheKeys.NETWORK_STATS]: number;
+  [CacheKeys.VALIDATOR_HISTORY]: number;
+  [CacheKeys.WALLET_STAKE_ACCOUNTS]: number;
 }
 
+// Load TTLs from environment variables with fallback defaults
 export const CACHE_TTLS: CacheTTLs = {
-  [CacheKeys.VALIDATORS]: 300,
-  [CacheKeys.VALIDATOR_DETAIL]: 120,
-  [CacheKeys.EPOCH_INFO]: 30,
-  [CacheKeys.NETWORK_STATS]: 300,
-  [CacheKeys.VALIDATOR_HISTORY]: 600,
-  [CacheKeys.WALLET_STAKE_ACCOUNTS]: 180,
+  [CacheKeys.VALIDATORS]: parseInt(process.env.CACHE_TTL_VALIDATORS || '300'), // 5 minutes default
+  [CacheKeys.VALIDATOR_DETAIL]: parseInt(process.env.CACHE_TTL_VALIDATOR_DETAIL || '120'), // 2 minutes default
+  [CacheKeys.EPOCH_INFO]: parseInt(process.env.CACHE_TTL_EPOCH || '30'), // 30 seconds default
+  [CacheKeys.NETWORK_STATS]: parseInt(process.env.CACHE_TTL_NETWORK_STATS || '300'), // 5 minutes default
+  [CacheKeys.VALIDATOR_HISTORY]: parseInt(process.env.CACHE_TTL_VALIDATOR_HISTORY || '600'), // 10 minutes default
+  [CacheKeys.WALLET_STAKE_ACCOUNTS]: parseInt(process.env.CACHE_TTL_WALLET_STAKE_ACCOUNTS || '180'), // 3 minutes default
 };
 
 interface CacheItem<T> {
@@ -80,7 +82,10 @@ export class CacheService {
    */
   async initialize(): Promise<void> {
     if (!this.config.redisUrl) {
-      console.log('No Redis URL provided, using in-memory cache only');
+      logger.info('No Redis URL provided, using in-memory cache only', { 
+        component: 'CacheService', 
+        operation: 'initialize' 
+      });
       return;
     }
 
@@ -93,31 +98,59 @@ export class CacheService {
       });
 
       this.redisClient.on('error', (error) => {
-        console.error('Redis connection error:', error);
+        logger.error('Redis connection error', { 
+          component: 'CacheService', 
+          operation: 'redis_connection', 
+          error 
+        });
         this.isRedisConnected = false;
       });
 
       this.redisClient.on('connect', () => {
-        console.log('Redis connected successfully');
+        logger.info('Redis connected successfully', { 
+          component: 'CacheService', 
+          operation: 'redis_connect' 
+        });
         this.isRedisConnected = true;
       });
 
       this.redisClient.on('disconnect', () => {
-        console.log('Redis disconnected');
+        logger.info('Redis disconnected', { 
+          component: 'CacheService', 
+          operation: 'redis_disconnect' 
+        });
         this.isRedisConnected = false;
       });
 
       await this.redisClient.connect();
-      console.log('Cache service initialized with Redis');
+      this.isRedisConnected = true;
+      logger.info('Cache service initialized with Redis', { 
+        component: 'CacheService', 
+        operation: 'initialize' 
+      });
     } catch (error) {
-      console.error('Failed to initialize Redis:', error);
+      logger.error('Failed to initialize Redis', { 
+        component: 'CacheService', 
+        operation: 'initialize', 
+        error: error instanceof Error ? error : new Error(String(error))
+      });
+      
       this.redisClient = null;
       this.isRedisConnected = false;
       
       if (this.config.enableInMemoryFallback) {
-        console.log('Falling back to in-memory cache');
+        logger.info('Falling back to in-memory cache', { 
+          component: 'CacheService', 
+          operation: 'fallback' 
+        });
       } else {
-        throw new Error('Redis connection failed and fallback disabled');
+        const errorMessage = `Redis connection failed and fallback disabled: ${error instanceof Error ? error.message : String(error)}`;
+        logger.error(errorMessage, { 
+          component: 'CacheService', 
+          operation: 'initialize', 
+          error: error instanceof Error ? error : new Error(String(error))
+        });
+        throw new Error(errorMessage);
       }
     }
   }
@@ -149,7 +182,12 @@ export class CacheService {
             return JSON.parse(redisValue);
           }
         } catch (redisError) {
-          console.error(`Redis get error for key ${key}:`, redisError);
+          logger.error(`Redis get error for key ${key}`, { 
+            component: 'CacheService', 
+            operation: 'get', 
+            key, 
+            error: redisError instanceof Error ? redisError : new Error(String(redisError))
+          });
           this.isRedisConnected = false;
           // Gracefully fall through to in-memory cache
         }
@@ -172,7 +210,12 @@ export class CacheService {
       this.stats.misses++;
       return null;
     } catch (error) {
-      console.error(`Cache get error for key ${key}:`, error);
+      logger.error(`Cache get error for key ${key}`, { 
+        component: 'CacheService', 
+        operation: 'get', 
+        key, 
+        error: error instanceof Error ? error : new Error(String(error))
+      });
       this.stats.misses++;
       return null;
     }
@@ -202,7 +245,12 @@ export class CacheService {
         try {
           await this.redisClient.setEx(key, ttl, serializedValue);
         } catch (redisError) {
-          console.error(`Redis set error for key ${key}:`, redisError);
+          logger.error(`Redis set error for key ${key}`, { 
+            component: 'CacheService', 
+            operation: 'set', 
+            key, 
+            error: redisError instanceof Error ? redisError : new Error(String(redisError))
+          });
           this.isRedisConnected = false;
           // Continue to set in memory cache as fallback
         }
@@ -216,7 +264,12 @@ export class CacheService {
         });
       }
     } catch (error) {
-      console.error(`Cache set error for key ${key}:`, error);
+      logger.error(`Cache set error for key ${key}`, { 
+        component: 'CacheService', 
+        operation: 'set', 
+        key, 
+        error: error instanceof Error ? error : new Error(String(error))
+      });
     }
   }
 
@@ -234,7 +287,12 @@ export class CacheService {
         try {
           await this.redisClient.del(key);
         } catch (redisError) {
-          console.error(`Redis delete error for key ${key}:`, redisError);
+          logger.error(`Redis delete error for key ${key}`, { 
+            component: 'CacheService', 
+            operation: 'delete', 
+            key, 
+            error: redisError instanceof Error ? redisError : new Error(String(redisError))
+          });
           this.isRedisConnected = false;
           // Continue to delete from memory cache
         }
@@ -243,7 +301,12 @@ export class CacheService {
       // Delete from memory cache
       this.inMemoryCache.delete(key);
     } catch (error) {
-      console.error(`Cache delete error for key ${key}:`, error);
+      logger.error(`Cache delete error for key ${key}`, { 
+        component: 'CacheService', 
+        operation: 'delete', 
+        key, 
+        error: error instanceof Error ? error : new Error(String(error))
+      });
     }
   }
 
@@ -265,7 +328,12 @@ export class CacheService {
             deletedCount += keys.length;
           }
         } catch (redisError) {
-          console.error(`Redis delete pattern error for ${pattern}:`, redisError);
+          logger.error(`Redis delete pattern error for ${pattern}`, { 
+            component: 'CacheService', 
+            operation: 'deletePattern', 
+            pattern, 
+            error: redisError instanceof Error ? redisError : new Error(String(redisError))
+          });
           this.isRedisConnected = false;
           // Continue to delete from memory cache
         }
@@ -278,7 +346,12 @@ export class CacheService {
       memoryKeys.forEach(key => this.inMemoryCache.delete(key));
       deletedCount += memoryKeys.length;
     } catch (error) {
-      console.error(`Cache delete pattern error for ${pattern}:`, error);
+      logger.error(`Cache delete pattern error for ${pattern}`, { 
+        component: 'CacheService', 
+        operation: 'deletePattern', 
+        pattern, 
+        error: error instanceof Error ? error : new Error(String(error))
+      });
     }
 
     return deletedCount;
@@ -294,7 +367,11 @@ export class CacheService {
         try {
           await this.redisClient.flushDb();
         } catch (redisError) {
-          console.error('Redis flush error:', redisError);
+          logger.error('Redis flush error', { 
+            component: 'CacheService', 
+            operation: 'flush', 
+            error: redisError instanceof Error ? redisError : new Error(String(redisError))
+          });
           this.isRedisConnected = false;
           // Continue to flush memory cache
         }
@@ -306,9 +383,16 @@ export class CacheService {
       // Reset stats
       this.stats = { hits: 0, misses: 0 };
       
-      console.log('Cache flushed successfully');
+      logger.info('Cache flushed successfully', { 
+        component: 'CacheService', 
+        operation: 'flush' 
+      });
     } catch (error) {
-      console.error('Cache flush error:', error);
+      logger.error('Cache flush error', { 
+        component: 'CacheService', 
+        operation: 'flush', 
+        error: error instanceof Error ? error : new Error(String(error))
+      });
       throw error;
     }
   }
@@ -337,13 +421,21 @@ export class CacheService {
             memoryUsage = parseInt(memoryMatch[1]);
           }
         } catch (redisError) {
-          console.error('Redis stats error:', redisError);
+          logger.error('Redis stats error', { 
+            component: 'CacheService', 
+            operation: 'getStats', 
+            error: redisError instanceof Error ? redisError : new Error(String(redisError))
+          });
           this.isRedisConnected = false;
           // Continue with memory cache stats only
         }
       }
     } catch (error) {
-      console.error('Error getting cache stats:', error);
+      logger.error('Error getting cache stats', { 
+        component: 'CacheService', 
+        operation: 'getStats', 
+        error: error instanceof Error ? error : new Error(String(error))
+      });
     }
 
     return {
@@ -414,7 +506,11 @@ export class CacheService {
       try {
         await this.redisClient.disconnect();
       } catch (error) {
-        console.error('Error disconnecting Redis client:', error);
+        logger.error('Error disconnecting Redis client', { 
+          component: 'CacheService', 
+          operation: 'disconnect', 
+          error: error instanceof Error ? error : new Error(String(error))
+        });
       } finally {
         this.redisClient = null;
       }

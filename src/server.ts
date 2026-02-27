@@ -16,6 +16,7 @@ import swaggerUi from 'swagger-ui-express';
 import { ValidatorService } from './services/validatorService';
 import { WebSocketService } from './services/websocketService';
 import { cacheService } from './services/cacheService';
+import { logger } from './utils/logger';
 
 // Load environment variables
 dotenv.config();
@@ -69,8 +70,14 @@ app.use(limiter); // Apply to all requests
 
 // Request logging middleware
 app.use((req, res, next) => {
-  const timestamp = new Date().toISOString();
-  console.log(`${timestamp} ${req.method} ${req.path} - ${req.ip}`);
+  logger.info('HTTP request', {
+    component: 'Server',
+    operation: 'http_request',
+    method: req.method,
+    path: req.path,
+    ip: req.ip,
+    userAgent: req.get('User-Agent')
+  });
   next();
 });
 
@@ -124,7 +131,11 @@ app.get('/health', async (req, res) => {
       solana: health
     });
   } catch (error) {
-    console.error('Health check failed:', error);
+    logger.error('Health check failed', {
+      component: 'Server',
+      operation: 'health_check',
+      error: error instanceof Error ? error : new Error(String(error))
+    });
     res.status(503).json({
       status: 'error',
       service: 'validator-analytics-api',
@@ -162,7 +173,14 @@ app.get('/api/validators', apiLimiter, validateQuery(validatorQuerySchema), asyn
     // Extract validated query parameters
     const { limit, sortBy, order, activeOnly } = req.query as any;
     
-    console.log(`Fetching validators with filters: limit=${limit}, sortBy=${sortBy}, order=${order}, activeOnly=${activeOnly}`);
+    logger.info('Fetching validators with filters', {
+      component: 'Server',
+      operation: 'get_validators',
+      limit,
+      sortBy,
+      order,
+      activeOnly
+    });
     
     // Fetch validator data
     const data = await validatorService.getValidators();
@@ -214,7 +232,12 @@ app.get('/api/validators', apiLimiter, validateQuery(validatorQuerySchema), asyn
     
     const responseTime = Date.now() - startTime;
     
-    console.log(`API response: ${validators.length} validators, ${responseTime}ms`);
+    logger.info('API response', {
+      component: 'Server',
+      operation: 'get_validators',
+      validatorCount: validators.length,
+      duration: responseTime
+    });
     
     // Return filtered and sorted data
     res.json({
@@ -234,7 +257,11 @@ app.get('/api/validators', apiLimiter, validateQuery(validatorQuerySchema), asyn
     });
     
   } catch (error) {
-    console.error('Error in /api/validators:', error);
+    logger.error('Error in /api/validators', {
+      component: 'Server',
+      operation: 'get_validators',
+      error: error instanceof Error ? error : new Error(String(error))
+    });
     
     // Determine appropriate error response based on error type
     let statusCode = 500;
@@ -323,13 +350,23 @@ app.get('/api/validators/compare', apiLimiter, async (req, res) => {
       });
     }
     
-    console.log(`Comparing ${voteAccounts.length} validators...`);
+    logger.info('Comparing validators', {
+      component: 'Server',
+      operation: 'compare_validators',
+      validatorCount: voteAccounts.length,
+      voteAccounts
+    });
     const startTime = Date.now();
     
     const comparison = await validatorService.compareValidators(voteAccounts);
     
     const responseTime = Date.now() - startTime;
-    console.log(`Validator comparison response: ${comparison.validators.length} validators, ${responseTime}ms`);
+    logger.info('Validator comparison response', {
+      component: 'Server',
+      operation: 'compare_validators',
+      resultCount: comparison.validators.length,
+      duration: responseTime
+    });
     
     res.json({
       ...comparison,
@@ -340,7 +377,11 @@ app.get('/api/validators/compare', apiLimiter, async (req, res) => {
     });
     
   } catch (error) {
-    console.error('Error in /api/validators/compare:', error);
+    logger.error('Error in /api/validators/compare', {
+      component: 'Server',
+      operation: 'compare_validators',
+      error: error instanceof Error ? error : new Error(String(error))
+    });
     
     let statusCode = 500;
     let errorMessage = 'Failed to compare validators';
@@ -390,7 +431,12 @@ app.get('/api/validators/top', apiLimiter, async (req, res) => {
       });
     }
     
-    console.log(`Fetching top ${limit} validators sorted by ${sortBy}...`);
+    logger.info('Fetching top validators', {
+      component: 'Server',
+      operation: 'get_top_validators',
+      limit,
+      sortBy
+    });
     const startTime = Date.now();
     
     const topValidators = await validatorService.getTopValidators(
@@ -399,7 +445,12 @@ app.get('/api/validators/top', apiLimiter, async (req, res) => {
     );
     
     const responseTime = Date.now() - startTime;
-    console.log(`Top validators response: ${topValidators.validators.length} validators, ${responseTime}ms`);
+    logger.info('Top validators response', {
+      component: 'Server',
+      operation: 'get_top_validators',
+      resultCount: topValidators.validators.length,
+      duration: responseTime
+    });
     
     res.json({
       ...topValidators,
@@ -410,7 +461,11 @@ app.get('/api/validators/top', apiLimiter, async (req, res) => {
     });
     
   } catch (error) {
-    console.error('Error in /api/validators/top:', error);
+    logger.error('Error in /api/validators/top', {
+      component: 'Server',
+      operation: 'get_top_validators',
+      error: error instanceof Error ? error : new Error(String(error))
+    });
     
     let statusCode = 500;
     let errorMessage = 'Failed to fetch top validators';
@@ -442,13 +497,21 @@ app.get('/api/validators/top', apiLimiter, async (req, res) => {
  */
 app.get('/api/alerts/delinquent', apiLimiter, async (req, res) => {
   try {
-    console.log('Fetching delinquent validator alerts...');
+    logger.info('Fetching delinquent validator alerts', {
+      component: 'Server',
+      operation: 'get_delinquent_validators'
+    });
     const startTime = Date.now();
     
     const delinquentAlerts = await validatorService.getDelinquentValidators();
     
     const responseTime = Date.now() - startTime;
-    console.log(`Delinquent alerts response: ${delinquentAlerts.delinquentValidators.length} validators, ${responseTime}ms`);
+    logger.info('Delinquent alerts response', {
+      component: 'Server',
+      operation: 'get_delinquent_validators',
+      delinquentCount: delinquentAlerts.delinquentValidators.length,
+      duration: responseTime
+    });
     
     res.json({
       ...delinquentAlerts,
@@ -459,7 +522,11 @@ app.get('/api/alerts/delinquent', apiLimiter, async (req, res) => {
     });
     
   } catch (error) {
-    console.error('Error in /api/alerts/delinquent:', error);
+    logger.error('Error in /api/alerts/delinquent', {
+      component: 'Server',
+      operation: 'get_delinquent_validators',
+      error: error instanceof Error ? error : new Error(String(error))
+    });
     
     let statusCode = 500;
     let errorMessage = 'Failed to fetch delinquent validator alerts';
@@ -504,13 +571,22 @@ app.get('/api/validators/:voteAccount', apiLimiter, async (req, res) => {
       });
     }
     
-    console.log(`Fetching detailed info for validator: ${voteAccount}`);
+    logger.info('Fetching detailed info for validator', {
+      component: 'Server',
+      operation: 'get_validator_detail',
+      voteAccount
+    });
     const startTime = Date.now();
     
     const validatorDetail = await validatorService.getValidatorDetail(voteAccount);
     
     const responseTime = Date.now() - startTime;
-    console.log(`Validator detail response: ${responseTime}ms`);
+    logger.info('Validator detail response', {
+      component: 'Server',
+      operation: 'get_validator_detail',
+      voteAccount,
+      duration: responseTime
+    });
     
     res.json({
       ...validatorDetail,
@@ -520,7 +596,12 @@ app.get('/api/validators/:voteAccount', apiLimiter, async (req, res) => {
     });
     
   } catch (error) {
-    console.error(`Error in /api/validators/:voteAccount:`, error);
+    logger.error('Error in /api/validators/:voteAccount', {
+      component: 'Server',
+      operation: 'get_validator_detail',
+      voteAccount: req.params.voteAccount,
+      error: error instanceof Error ? error : new Error(String(error))
+    });
     
     let statusCode = 500;
     let errorMessage = 'Failed to fetch validator detail';
@@ -571,13 +652,23 @@ app.get('/api/validators/:voteAccount/history', apiLimiter, async (req, res) => 
       });
     }
     
-    console.log(`Fetching history for validator: ${voteAccount}`);
+    logger.info('Fetching history for validator', {
+      component: 'Server',
+      operation: 'get_validator_history',
+      voteAccount
+    });
     const startTime = Date.now();
     
     const validatorHistory = await validatorService.getValidatorHistory(voteAccount);
     
     const responseTime = Date.now() - startTime;
-    console.log(`Validator history response: ${responseTime}ms`);
+    logger.info('Validator history response', {
+      component: 'Server',
+      operation: 'get_validator_history',
+      voteAccount,
+      epochCount: validatorHistory.epochHistory.length,
+      duration: responseTime
+    });
     
     res.json({
       ...validatorHistory,
@@ -588,7 +679,12 @@ app.get('/api/validators/:voteAccount/history', apiLimiter, async (req, res) => 
     });
     
   } catch (error) {
-    console.error(`Error in /api/validators/:voteAccount/history:`, error);
+    logger.error('Error in /api/validators/:voteAccount/history', {
+      component: 'Server',
+      operation: 'get_validator_history',
+      voteAccount: req.params.voteAccount,
+      error: error instanceof Error ? error : new Error(String(error))
+    });
     
     let statusCode = 500;
     let errorMessage = 'Failed to fetch validator history';
@@ -626,13 +722,21 @@ app.get('/api/validators/:voteAccount/history', apiLimiter, async (req, res) => 
  */
 app.get('/api/epoch/current', apiLimiter, async (req, res) => {
   try {
-    console.log('Fetching current epoch info');
+    logger.info('Fetching current epoch info', {
+      component: 'Server',
+      operation: 'get_current_epoch'
+    });
     const startTime = Date.now();
     
     const epochInfo = await validatorService.getCurrentEpochInfo();
     
     const responseTime = Date.now() - startTime;
-    console.log(`Current epoch response: ${responseTime}ms`);
+    logger.info('Current epoch response', {
+      component: 'Server',
+      operation: 'get_current_epoch',
+      epoch: epochInfo.epoch,
+      duration: responseTime
+    });
     
     res.json({
       ...epochInfo,
@@ -642,7 +746,11 @@ app.get('/api/epoch/current', apiLimiter, async (req, res) => {
     });
     
   } catch (error) {
-    console.error('Error in /api/epoch/current:', error);
+    logger.error('Error in /api/epoch/current', {
+      component: 'Server',
+      operation: 'get_current_epoch',
+      error: error instanceof Error ? error : new Error(String(error))
+    });
     
     let statusCode = 500;
     let errorMessage = 'Failed to fetch epoch information';
@@ -686,13 +794,23 @@ app.get('/api/stake-accounts/:wallet', apiLimiter, async (req, res) => {
       });
     }
     
-    console.log(`Fetching stake accounts for wallet: ${wallet}`);
+    logger.info('Fetching stake accounts for wallet', {
+      component: 'Server',
+      operation: 'get_wallet_stake_accounts',
+      wallet
+    });
     const startTime = Date.now();
     
     const stakeAccountsData = await validatorService.getWalletStakeAccounts(wallet);
     
     const responseTime = Date.now() - startTime;
-    console.log(`Stake accounts response: ${stakeAccountsData.stakeAccounts.length} accounts, ${responseTime}ms`);
+    logger.info('Stake accounts response', {
+      component: 'Server',
+      operation: 'get_wallet_stake_accounts',
+      wallet,
+      accountCount: stakeAccountsData.stakeAccounts.length,
+      duration: responseTime
+    });
     
     res.json({
       ...stakeAccountsData,
@@ -703,7 +821,12 @@ app.get('/api/stake-accounts/:wallet', apiLimiter, async (req, res) => {
     });
     
   } catch (error) {
-    console.error(`Error in /api/stake-accounts/:wallet:`, error);
+    logger.error('Error in /api/stake-accounts/:wallet', {
+      component: 'Server',
+      operation: 'get_wallet_stake_accounts',
+      wallet: req.params.wallet,
+      error: error instanceof Error ? error : new Error(String(error))
+    });
     
     let statusCode = 500;
     let errorMessage = 'Failed to fetch stake accounts';
@@ -781,13 +904,21 @@ app.get('/api/websocket/status', (req, res) => {
  */
 app.get('/api/network/stats', apiLimiter, async (req, res) => {
   try {
-    console.log('Fetching network statistics...');
+    logger.info('Fetching network statistics', {
+      component: 'Server',
+      operation: 'get_network_stats'
+    });
     const startTime = Date.now();
     
     const networkStats = await validatorService.getNetworkStats();
     
     const responseTime = Date.now() - startTime;
-    console.log(`Network stats response: ${responseTime}ms`);
+    logger.info('Network stats response', {
+      component: 'Server',
+      operation: 'get_network_stats',
+      validatorCount: networkStats.totalValidators,
+      duration: responseTime
+    });
     
     res.json({
       ...networkStats,
@@ -797,7 +928,11 @@ app.get('/api/network/stats', apiLimiter, async (req, res) => {
     });
     
   } catch (error) {
-    console.error('Error in /api/network/stats:', error);
+    logger.error('Error in /api/network/stats', {
+      component: 'Server',
+      operation: 'get_network_stats',
+      error: error instanceof Error ? error : new Error(String(error))
+    });
     
     let statusCode = 500;
     let errorMessage = 'Failed to fetch network statistics';
@@ -827,7 +962,11 @@ app.post('/admin/cache/flush', async (req, res) => {
       timestamp: Date.now()
     });
   } catch (error) {
-    console.error('Cache flush error:', error);
+    logger.error('Cache flush error', {
+      component: 'Server',
+      operation: 'admin_cache_flush',
+      error: error instanceof Error ? error : new Error(String(error))
+    });
     res.status(500).json({
       error: 'Cache Flush Failed',
       message: error instanceof Error ? error.message : 'Unknown error',
@@ -844,7 +983,11 @@ app.get('/admin/cache/stats', async (req, res) => {
       timestamp: Date.now()
     });
   } catch (error) {
-    console.error('Cache stats error:', error);
+    logger.error('Cache stats error', {
+      component: 'Server',
+      operation: 'admin_cache_stats',
+      error: error instanceof Error ? error : new Error(String(error))
+    });
     res.status(500).json({
       error: 'Cache Stats Failed',
       message: error instanceof Error ? error.message : 'Unknown error',
@@ -860,9 +1003,18 @@ let swaggerDocument: any = null;
 try {
   const openApiContent = fs.readFileSync(openApiPath, 'utf8');
   swaggerDocument = YAML.parse(openApiContent) as any;
-  console.log('✅ OpenAPI specification loaded successfully');
+  logger.info('OpenAPI specification loaded successfully', {
+    component: 'Server',
+    operation: 'openapi_load',
+    path: openApiPath
+  });
 } catch (error) {
-  console.error('❌ Failed to load OpenAPI specification:', error);
+  logger.error('Failed to load OpenAPI specification', {
+    component: 'Server',
+    operation: 'openapi_load',
+    path: openApiPath,
+    error: error instanceof Error ? error : new Error(String(error))
+  });
 }
 
 // Swagger UI Documentation endpoint
@@ -961,7 +1113,13 @@ app.use('*', (req, res) => {
 
 // Error handler
 app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  console.error('Unhandled error:', err);
+  logger.error('Unhandled error', {
+    component: 'Server',
+    operation: 'error_handler',
+    method: req.method,
+    path: req.path,
+    error: err
+  });
   res.status(500).json({
     error: 'Internal Server Error',
     message: 'An unexpected error occurred',
@@ -972,31 +1130,50 @@ app.use((err: Error, req: express.Request, res: express.Response, next: express.
 // Only start server if this file is run directly (not imported)
 if (require.main === module) {
   server.listen(PORT, async () => {
-    console.log(`🚀 Validator Analytics API v2 running on port ${PORT}`);
-    console.log(`📡 Using Solana RPC: ${RPC_URL}`);
-    console.log(`🔍 API Documentation: http://localhost:${PORT}/`);
-    console.log(`⚡ Health Check: http://localhost:${PORT}/health`);
-    console.log(`🎯 Validators Endpoint: http://localhost:${PORT}/api/validators`);
-    console.log(`📊 V2 Endpoints: epoch, validator details, history, stake accounts`);
-    console.log(`🔌 WebSocket: ws://localhost:${PORT}/ws`);
+    logger.info('Validator Analytics API v2 started', {
+      component: 'Server',
+      operation: 'startup',
+      port: PORT,
+      rpcUrl: RPC_URL,
+      endpoints: {
+        documentation: `http://localhost:${PORT}/`,
+        health: `http://localhost:${PORT}/health`,
+        validators: `http://localhost:${PORT}/api/validators`,
+        websocket: `ws://localhost:${PORT}/ws`
+      }
+    });
     
     // Initialize cache service
     try {
       await cacheService.initialize();
       cacheService.startCleanupTask();
-      console.log(`💾 Cache service initialized${process.env.REDIS_URL ? ' with Redis' : ' with in-memory fallback'}`);
+      logger.info('Cache service initialized', {
+        component: 'Server',
+        operation: 'cache_init',
+        redisEnabled: !!process.env.REDIS_URL
+      });
     } catch (error) {
-      console.error('❌ Cache service initialization failed:', error);
+      logger.error('Cache service initialization failed', {
+        component: 'Server',
+        operation: 'cache_init',
+        error: error instanceof Error ? error : new Error(String(error))
+      });
     }
     
     // Initialize WebSocket service after server starts
     websocketService = new WebSocketService(server, validatorService);
-    console.log(`📡 WebSocket service initialized`);
+    logger.info('WebSocket service initialized', {
+      component: 'Server',
+      operation: 'websocket_init'
+    });
   });
 
   // Graceful shutdown
   process.on('SIGTERM', async () => {
-    console.log('SIGTERM received, shutting down gracefully...');
+    logger.info('SIGTERM received, shutting down gracefully', {
+      component: 'Server',
+      operation: 'shutdown'
+    });
     
     if (websocketService) {
       websocketService.close();
@@ -1005,13 +1182,23 @@ if (require.main === module) {
     // Disconnect cache service
     try {
       await cacheService.disconnect();
-      console.log('Cache service disconnected');
+      logger.info('Cache service disconnected', {
+        component: 'Server',
+        operation: 'shutdown'
+      });
     } catch (error) {
-      console.error('Error disconnecting cache service:', error);
+      logger.error('Error disconnecting cache service', {
+        component: 'Server',
+        operation: 'shutdown',
+        error: error instanceof Error ? error : new Error(String(error))
+      });
     }
     
     server.close(() => {
-      console.log('Server closed');
+      logger.info('Server closed', {
+        component: 'Server',
+        operation: 'shutdown'
+      });
       process.exit(0);
     });
   });
