@@ -86,7 +86,7 @@ describe('Aggregation Endpoints', () => {
         .expect(400);
 
       expect(response.body).toHaveProperty('error');
-      expect(response.body.error).toBe('Invalid Parameter');
+      expect(response.body.error).toBe('Missing Required Parameter');
     });
 
     it('should reject more than 5 validators', async () => {
