@@ -9,14 +9,9 @@ import dotenv from 'dotenv';
 import rateLimit from 'express-rate-limit';
 import Joi from 'joi';
 import { createServer } from 'http';
-import path from 'path';
-import fs from 'fs';
-import YAML from 'yaml';
-import swaggerUi from 'swagger-ui-express';
 import { ValidatorService } from './services/validatorService';
 import { WebSocketService } from './services/websocketService';
-import { cacheService } from './services/cacheService';
-import { logger } from './utils/logger';
+import { ValidatorAnalyticsService } from './services/validatorAnalyticsService';
 
 // Load environment variables
 dotenv.config();
@@ -30,6 +25,7 @@ const server = createServer(app);
 
 // Initialize services
 const validatorService = new ValidatorService(RPC_URL);
+const validatorAnalyticsService = new ValidatorAnalyticsService(RPC_URL);
 let websocketService: WebSocketService;
 
 // Rate limiting middleware
@@ -70,14 +66,8 @@ app.use(limiter); // Apply to all requests
 
 // Request logging middleware
 app.use((req, res, next) => {
-  logger.info('HTTP request', {
-    component: 'Server',
-    operation: 'http_request',
-    method: req.method,
-    path: req.path,
-    ip: req.ip,
-    userAgent: req.get('User-Agent')
-  });
+  const timestamp = new Date().toISOString();
+  console.log(`${timestamp} ${req.method} ${req.path} - ${req.ip}`);
   next();
 });
 
@@ -131,11 +121,7 @@ app.get('/health', async (req, res) => {
       solana: health
     });
   } catch (error) {
-    logger.error('Health check failed', {
-      component: 'Server',
-      operation: 'health_check',
-      error: error instanceof Error ? error : new Error(String(error))
-    });
+    console.error('Health check failed:', error);
     res.status(503).json({
       status: 'error',
       service: 'validator-analytics-api',
@@ -173,14 +159,7 @@ app.get('/api/validators', apiLimiter, validateQuery(validatorQuerySchema), asyn
     // Extract validated query parameters
     const { limit, sortBy, order, activeOnly } = req.query as any;
     
-    logger.info('Fetching validators with filters', {
-      component: 'Server',
-      operation: 'get_validators',
-      limit,
-      sortBy,
-      order,
-      activeOnly
-    });
+    console.log(`Fetching validators with filters: limit=${limit}, sortBy=${sortBy}, order=${order}, activeOnly=${activeOnly}`);
     
     // Fetch validator data
     const data = await validatorService.getValidators();
@@ -232,12 +211,7 @@ app.get('/api/validators', apiLimiter, validateQuery(validatorQuerySchema), asyn
     
     const responseTime = Date.now() - startTime;
     
-    logger.info('API response', {
-      component: 'Server',
-      operation: 'get_validators',
-      validatorCount: validators.length,
-      duration: responseTime
-    });
+    console.log(`API response: ${validators.length} validators, ${responseTime}ms`);
     
     // Return filtered and sorted data
     res.json({
@@ -257,11 +231,7 @@ app.get('/api/validators', apiLimiter, validateQuery(validatorQuerySchema), asyn
     });
     
   } catch (error) {
-    logger.error('Error in /api/validators', {
-      component: 'Server',
-      operation: 'get_validators',
-      error: error instanceof Error ? error : new Error(String(error))
-    });
+    console.error('Error in /api/validators:', error);
     
     // Determine appropriate error response based on error type
     let statusCode = 500;
@@ -293,260 +263,6 @@ app.get('/api/validators', apiLimiter, validateQuery(validatorQuerySchema), asyn
 });
 
 /**
- * GET /api/validators/compare?validators=A,B,C
- * Compare up to 5 validators side by side
- * 
- * Query Parameters:
- * - validators: Comma-separated list of vote account addresses (max 5)
- * 
- * Returns comparison data including:
- * - Commission, APY, uptime, skip rate, stake
- * - Ranked by performance score
- * - Phase validators flagged
- */
-app.get('/api/validators/compare', apiLimiter, async (req, res) => {
-  try {
-    const validatorsParam = req.query.validators as string;
-    
-    if (!validatorsParam) {
-      return res.status(400).json({
-        error: 'Missing Required Parameter',
-        message: 'validators parameter is required',
-        example: '/api/validators/compare?validators=vote1,vote2,vote3',
-        timestamp: Date.now()
-      });
-    }
-    
-    const voteAccounts = validatorsParam.split(',').map(v => v.trim()).filter(v => v.length > 0);
-    
-    if (voteAccounts.length === 0) {
-      return res.status(400).json({
-        error: 'Invalid Parameter',
-        message: 'No valid vote accounts provided',
-        timestamp: Date.now()
-      });
-    }
-    
-    if (voteAccounts.length > 5) {
-      return res.status(400).json({
-        error: 'Too Many Validators',
-        message: 'Maximum 5 validators can be compared at once',
-        provided: voteAccounts.length,
-        timestamp: Date.now()
-      });
-    }
-    
-    // Validate vote account format
-    const invalidVoteAccounts = voteAccounts.filter(account => 
-      account.length < 32 || account.length > 44 || !/^[1-9A-HJ-NP-Za-km-z]+$/.test(account)
-    );
-    
-    if (invalidVoteAccounts.length > 0) {
-      return res.status(400).json({
-        error: 'Invalid Vote Account Format',
-        message: 'Vote accounts must be valid 32-44 character base58 strings',
-        invalidAccounts: invalidVoteAccounts,
-        timestamp: Date.now()
-      });
-    }
-    
-    logger.info('Comparing validators', {
-      component: 'Server',
-      operation: 'compare_validators',
-      validatorCount: voteAccounts.length,
-      voteAccounts
-    });
-    const startTime = Date.now();
-    
-    const comparison = await validatorService.compareValidators(voteAccounts);
-    
-    const responseTime = Date.now() - startTime;
-    logger.info('Validator comparison response', {
-      component: 'Server',
-      operation: 'compare_validators',
-      resultCount: comparison.validators.length,
-      duration: responseTime
-    });
-    
-    res.json({
-      ...comparison,
-      meta: {
-        ...comparison.meta,
-        responseTimeMs: responseTime
-      }
-    });
-    
-  } catch (error) {
-    logger.error('Error in /api/validators/compare', {
-      component: 'Server',
-      operation: 'compare_validators',
-      error: error instanceof Error ? error : new Error(String(error))
-    });
-    
-    let statusCode = 500;
-    let errorMessage = 'Failed to compare validators';
-    
-    if (error instanceof Error) {
-      if (error.message.includes('Connection') || error.message.includes('timeout')) {
-        statusCode = 503;
-        errorMessage = 'Unable to connect to Solana RPC';
-      }
-    }
-    
-    res.status(statusCode).json({
-      error: 'Service Error',
-      message: errorMessage,
-      timestamp: Date.now()
-    });
-  }
-});
-
-/**
- * GET /api/validators/top
- * Top validators leaderboard
- * 
- * Query Parameters:
- * - sort: Sort criteria (apy|uptime|stake) (default: apy)
- * - limit: Number of validators to return (1-100, default: 20)
- * 
- * Returns leaderboard with:
- * - Top validators by specified criteria
- * - Phase validators flagged
- * - Performance scores and rankings
- */
-app.get('/api/validators/top', apiLimiter, async (req, res) => {
-  try {
-    const sortBy = (req.query.sort as string) || 'apy';
-    const parsedLimit = parseInt(req.query.limit as string);
-    const limit = Math.min(Math.max(isNaN(parsedLimit) ? 20 : parsedLimit, 1), 100);
-    
-    // Validate sort parameter
-    const validSortFields = ['apy', 'uptime', 'stake'];
-    if (!validSortFields.includes(sortBy)) {
-      return res.status(400).json({
-        error: 'Invalid Sort Parameter',
-        message: `sort must be one of: ${validSortFields.join(', ')}`,
-        provided: sortBy,
-        timestamp: Date.now()
-      });
-    }
-    
-    logger.info('Fetching top validators', {
-      component: 'Server',
-      operation: 'get_top_validators',
-      limit,
-      sortBy
-    });
-    const startTime = Date.now();
-    
-    const topValidators = await validatorService.getTopValidators(
-      sortBy as 'apy' | 'uptime' | 'stake',
-      limit
-    );
-    
-    const responseTime = Date.now() - startTime;
-    logger.info('Top validators response', {
-      component: 'Server',
-      operation: 'get_top_validators',
-      resultCount: topValidators.validators.length,
-      duration: responseTime
-    });
-    
-    res.json({
-      ...topValidators,
-      meta: {
-        ...topValidators.meta,
-        responseTimeMs: responseTime
-      }
-    });
-    
-  } catch (error) {
-    logger.error('Error in /api/validators/top', {
-      component: 'Server',
-      operation: 'get_top_validators',
-      error: error instanceof Error ? error : new Error(String(error))
-    });
-    
-    let statusCode = 500;
-    let errorMessage = 'Failed to fetch top validators';
-    
-    if (error instanceof Error) {
-      if (error.message.includes('Connection') || error.message.includes('timeout')) {
-        statusCode = 503;
-        errorMessage = 'Unable to connect to Solana RPC';
-      }
-    }
-    
-    res.status(statusCode).json({
-      error: 'Service Error',
-      message: errorMessage,
-      timestamp: Date.now()
-    });
-  }
-});
-
-/**
- * GET /api/alerts/delinquent
- * Currently delinquent validators alert system
- * 
- * Returns alerts for validators that are currently delinquent:
- * - List of delinquent validators with last vote slot
- * - How long they've been delinquent
- * - Their total stake at risk
- * - Phase validators highlighted
- */
-app.get('/api/alerts/delinquent', apiLimiter, async (req, res) => {
-  try {
-    logger.info('Fetching delinquent validator alerts', {
-      component: 'Server',
-      operation: 'get_delinquent_validators'
-    });
-    const startTime = Date.now();
-    
-    const delinquentAlerts = await validatorService.getDelinquentValidators();
-    
-    const responseTime = Date.now() - startTime;
-    logger.info('Delinquent alerts response', {
-      component: 'Server',
-      operation: 'get_delinquent_validators',
-      delinquentCount: delinquentAlerts.delinquentValidators.length,
-      duration: responseTime
-    });
-    
-    res.json({
-      ...delinquentAlerts,
-      meta: {
-        ...delinquentAlerts.meta,
-        responseTimeMs: responseTime
-      }
-    });
-    
-  } catch (error) {
-    logger.error('Error in /api/alerts/delinquent', {
-      component: 'Server',
-      operation: 'get_delinquent_validators',
-      error: error instanceof Error ? error : new Error(String(error))
-    });
-    
-    let statusCode = 500;
-    let errorMessage = 'Failed to fetch delinquent validator alerts';
-    
-    if (error instanceof Error) {
-      if (error.message.includes('Connection') || error.message.includes('timeout')) {
-        statusCode = 503;
-        errorMessage = 'Unable to connect to Solana RPC';
-      }
-    }
-    
-    res.status(statusCode).json({
-      error: 'Service Error',
-      message: errorMessage,
-      timestamp: Date.now()
-    });
-  }
-});
-
-/**
  * GET /api/validators/:voteAccount
  * V2 ENDPOINT: Single validator detail view
  * 
@@ -571,22 +287,13 @@ app.get('/api/validators/:voteAccount', apiLimiter, async (req, res) => {
       });
     }
     
-    logger.info('Fetching detailed info for validator', {
-      component: 'Server',
-      operation: 'get_validator_detail',
-      voteAccount
-    });
+    console.log(`Fetching detailed info for validator: ${voteAccount}`);
     const startTime = Date.now();
     
     const validatorDetail = await validatorService.getValidatorDetail(voteAccount);
     
     const responseTime = Date.now() - startTime;
-    logger.info('Validator detail response', {
-      component: 'Server',
-      operation: 'get_validator_detail',
-      voteAccount,
-      duration: responseTime
-    });
+    console.log(`Validator detail response: ${responseTime}ms`);
     
     res.json({
       ...validatorDetail,
@@ -596,12 +303,7 @@ app.get('/api/validators/:voteAccount', apiLimiter, async (req, res) => {
     });
     
   } catch (error) {
-    logger.error('Error in /api/validators/:voteAccount', {
-      component: 'Server',
-      operation: 'get_validator_detail',
-      voteAccount: req.params.voteAccount,
-      error: error instanceof Error ? error : new Error(String(error))
-    });
+    console.error(`Error in /api/validators/:voteAccount:`, error);
     
     let statusCode = 500;
     let errorMessage = 'Failed to fetch validator detail';
@@ -652,23 +354,13 @@ app.get('/api/validators/:voteAccount/history', apiLimiter, async (req, res) => 
       });
     }
     
-    logger.info('Fetching history for validator', {
-      component: 'Server',
-      operation: 'get_validator_history',
-      voteAccount
-    });
+    console.log(`Fetching history for validator: ${voteAccount}`);
     const startTime = Date.now();
     
     const validatorHistory = await validatorService.getValidatorHistory(voteAccount);
     
     const responseTime = Date.now() - startTime;
-    logger.info('Validator history response', {
-      component: 'Server',
-      operation: 'get_validator_history',
-      voteAccount,
-      epochCount: validatorHistory.epochHistory.length,
-      duration: responseTime
-    });
+    console.log(`Validator history response: ${responseTime}ms`);
     
     res.json({
       ...validatorHistory,
@@ -679,12 +371,7 @@ app.get('/api/validators/:voteAccount/history', apiLimiter, async (req, res) => 
     });
     
   } catch (error) {
-    logger.error('Error in /api/validators/:voteAccount/history', {
-      component: 'Server',
-      operation: 'get_validator_history',
-      voteAccount: req.params.voteAccount,
-      error: error instanceof Error ? error : new Error(String(error))
-    });
+    console.error(`Error in /api/validators/:voteAccount/history:`, error);
     
     let statusCode = 500;
     let errorMessage = 'Failed to fetch validator history';
@@ -722,21 +409,13 @@ app.get('/api/validators/:voteAccount/history', apiLimiter, async (req, res) => 
  */
 app.get('/api/epoch/current', apiLimiter, async (req, res) => {
   try {
-    logger.info('Fetching current epoch info', {
-      component: 'Server',
-      operation: 'get_current_epoch'
-    });
+    console.log('Fetching current epoch info');
     const startTime = Date.now();
     
     const epochInfo = await validatorService.getCurrentEpochInfo();
     
     const responseTime = Date.now() - startTime;
-    logger.info('Current epoch response', {
-      component: 'Server',
-      operation: 'get_current_epoch',
-      epoch: epochInfo.epoch,
-      duration: responseTime
-    });
+    console.log(`Current epoch response: ${responseTime}ms`);
     
     res.json({
       ...epochInfo,
@@ -746,11 +425,7 @@ app.get('/api/epoch/current', apiLimiter, async (req, res) => {
     });
     
   } catch (error) {
-    logger.error('Error in /api/epoch/current', {
-      component: 'Server',
-      operation: 'get_current_epoch',
-      error: error instanceof Error ? error : new Error(String(error))
-    });
+    console.error('Error in /api/epoch/current:', error);
     
     let statusCode = 500;
     let errorMessage = 'Failed to fetch epoch information';
@@ -794,23 +469,13 @@ app.get('/api/stake-accounts/:wallet', apiLimiter, async (req, res) => {
       });
     }
     
-    logger.info('Fetching stake accounts for wallet', {
-      component: 'Server',
-      operation: 'get_wallet_stake_accounts',
-      wallet
-    });
+    console.log(`Fetching stake accounts for wallet: ${wallet}`);
     const startTime = Date.now();
     
     const stakeAccountsData = await validatorService.getWalletStakeAccounts(wallet);
     
     const responseTime = Date.now() - startTime;
-    logger.info('Stake accounts response', {
-      component: 'Server',
-      operation: 'get_wallet_stake_accounts',
-      wallet,
-      accountCount: stakeAccountsData.stakeAccounts.length,
-      duration: responseTime
-    });
+    console.log(`Stake accounts response: ${stakeAccountsData.stakeAccounts.length} accounts, ${responseTime}ms`);
     
     res.json({
       ...stakeAccountsData,
@@ -821,12 +486,7 @@ app.get('/api/stake-accounts/:wallet', apiLimiter, async (req, res) => {
     });
     
   } catch (error) {
-    logger.error('Error in /api/stake-accounts/:wallet', {
-      component: 'Server',
-      operation: 'get_wallet_stake_accounts',
-      wallet: req.params.wallet,
-      error: error instanceof Error ? error : new Error(String(error))
-    });
+    console.error(`Error in /api/stake-accounts/:wallet:`, error);
     
     let statusCode = 500;
     let errorMessage = 'Failed to fetch stake accounts';
@@ -892,155 +552,124 @@ app.get('/api/websocket/status', (req, res) => {
 });
 
 /**
- * GET /api/network/stats
- * Network-wide staking overview
+ * GET /api/validator-analytics/v1
+ * Phase 1 ENDPOINT: Enhanced validator analytics with Stakewiz metadata + SVT financial data
  * 
- * Returns comprehensive network statistics including:
- * - Total validators (active + delinquent)
- * - Total stake, average stake per validator
- * - Network APY estimate
- * - Nakamoto coefficient (decentralization metric)
- * - Epoch progress percentage
+ * Query Parameters:
+ * - limit: Number of validators to return (1-100, default: 50)
+ * - offset: Starting position (default: 0)
+ * - sortBy: Sort field (stake|apy|commission|risk) (default: stake)
+ * - voteAccount: Specific validator vote account to analyze
+ * 
+ * Returns:
+ * {
+ *   validators: ValidatorAnalyticsV1[],
+ *   pagination: { total, limit, offset, hasNext },
+ *   aggregates: { totalStake, averageAPY, averageCommission, totalValidators },
+ *   meta: { responseTimeMs, epoch, timestamp }
+ * }
  */
-app.get('/api/network/stats', apiLimiter, async (req, res) => {
+app.get('/api/validator-analytics/v1', apiLimiter, async (req, res) => {
   try {
-    logger.info('Fetching network statistics', {
-      component: 'Server',
-      operation: 'get_network_stats'
-    });
     const startTime = Date.now();
     
-    const networkStats = await validatorService.getNetworkStats();
+    // Extract and validate query parameters
+    const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
+    const offset = Math.max(parseInt(req.query.offset as string) || 0, 0);
+    const sortBy = (req.query.sortBy as string) || 'stake';
+    const voteAccount = req.query.voteAccount as string;
+    
+    // Validate sortBy parameter
+    const validSortFields = ['stake', 'apy', 'commission', 'risk'];
+    if (!validSortFields.includes(sortBy)) {
+      return res.status(400).json({
+        error: 'Invalid sortBy parameter',
+        message: `sortBy must be one of: ${validSortFields.join(', ')}`,
+        provided: sortBy,
+        timestamp: Date.now()
+      });
+    }
+
+    // Validate voteAccount if provided
+    if (voteAccount && (voteAccount.length < 32 || voteAccount.length > 44)) {
+      return res.status(400).json({
+        error: 'Invalid voteAccount parameter',
+        message: 'voteAccount must be a valid 32-44 character base58 string',
+        provided: voteAccount,
+        timestamp: Date.now()
+      });
+    }
+    
+    console.log(`Validator Analytics V1: limit=${limit}, offset=${offset}, sortBy=${sortBy}, voteAccount=${voteAccount}`);
+    
+    // Fetch enhanced validator analytics
+    const analyticsData = await validatorAnalyticsService.getValidatorAnalytics({
+      limit,
+      offset,
+      sortBy: sortBy as 'stake' | 'apy' | 'commission' | 'risk',
+      voteAccount
+    });
     
     const responseTime = Date.now() - startTime;
-    logger.info('Network stats response', {
-      component: 'Server',
-      operation: 'get_network_stats',
-      validatorCount: networkStats.totalValidators,
-      duration: responseTime
-    });
+    console.log(`Validator Analytics V1 response: ${analyticsData.validators.length} validators, ${responseTime}ms`);
     
-    res.json({
-      ...networkStats,
-      meta: {
-        responseTimeMs: responseTime
-      }
-    });
+    res.json(analyticsData);
     
   } catch (error) {
-    logger.error('Error in /api/network/stats', {
-      component: 'Server',
-      operation: 'get_network_stats',
-      error: error instanceof Error ? error : new Error(String(error))
-    });
+    console.error('Error in /api/validator-analytics/v1:', error);
     
     let statusCode = 500;
-    let errorMessage = 'Failed to fetch network statistics';
+    let errorMessage = 'Failed to fetch validator analytics';
     
     if (error instanceof Error) {
-      if (error.message.includes('Connection') || error.message.includes('timeout')) {
+      if (error.message.includes('not found')) {
+        statusCode = 404;
+        errorMessage = error.message;
+      } else if (error.message.includes('Connection') || error.message.includes('timeout')) {
         statusCode = 503;
-        errorMessage = 'Unable to connect to Solana RPC';
+        errorMessage = 'Unable to connect to data sources. Please try again later.';
+      } else if (error.message.includes('Rate limit')) {
+        statusCode = 429;
+        errorMessage = 'Rate limit exceeded. Please try again later.';
       }
     }
     
     res.status(statusCode).json({
-      error: 'Service Error',
+      error: statusCode === 500 ? 'Internal Server Error' : 'Service Error',
       message: errorMessage,
+      details: process.env.NODE_ENV === 'development' 
+        ? (error instanceof Error ? error.message : 'Unknown error')
+        : undefined,
       timestamp: Date.now()
     });
   }
 });
 
-// Admin endpoints for cache management
-app.post('/admin/cache/flush', async (req, res) => {
+/**
+ * GET /api/validator-analytics/v1/health
+ * Health check for validator analytics data sources
+ */
+app.get('/api/validator-analytics/v1/health', async (req, res) => {
   try {
-    await cacheService.flush();
-    res.json({
-      success: true,
-      message: 'Cache flushed successfully',
+    const health = await validatorAnalyticsService.healthCheck();
+    const allHealthy = health.onChain && health.stakewiz && health.svt;
+    
+    res.status(allHealthy ? 200 : 503).json({
+      status: allHealthy ? 'healthy' : 'degraded',
+      service: 'validator-analytics-v1',
+      dataSources: health,
       timestamp: Date.now()
     });
   } catch (error) {
-    logger.error('Cache flush error', {
-      component: 'Server',
-      operation: 'admin_cache_flush',
-      error: error instanceof Error ? error : new Error(String(error))
-    });
-    res.status(500).json({
-      error: 'Cache Flush Failed',
-      message: error instanceof Error ? error.message : 'Unknown error',
+    console.error('Health check failed for validator analytics:', error);
+    res.status(503).json({
+      status: 'unhealthy',
+      service: 'validator-analytics-v1',
+      error: error instanceof Error ? error.message : 'Unknown error',
       timestamp: Date.now()
     });
   }
 });
-
-app.get('/admin/cache/stats', async (req, res) => {
-  try {
-    const stats = await cacheService.getStats();
-    res.json({
-      ...stats,
-      timestamp: Date.now()
-    });
-  } catch (error) {
-    logger.error('Cache stats error', {
-      component: 'Server',
-      operation: 'admin_cache_stats',
-      error: error instanceof Error ? error : new Error(String(error))
-    });
-    res.status(500).json({
-      error: 'Cache Stats Failed',
-      message: error instanceof Error ? error.message : 'Unknown error',
-      timestamp: Date.now()
-    });
-  }
-});
-
-// Load OpenAPI specification
-const openApiPath = path.join(__dirname, '..', 'docs', 'openapi.yaml');
-let swaggerDocument: any = null;
-
-try {
-  const openApiContent = fs.readFileSync(openApiPath, 'utf8');
-  swaggerDocument = YAML.parse(openApiContent) as any;
-  logger.info('OpenAPI specification loaded successfully', {
-    component: 'Server',
-    operation: 'openapi_load',
-    path: openApiPath
-  });
-} catch (error) {
-  logger.error('Failed to load OpenAPI specification', {
-    component: 'Server',
-    operation: 'openapi_load',
-    path: openApiPath,
-    error: error instanceof Error ? error : new Error(String(error))
-  });
-}
-
-// Swagger UI Documentation endpoint
-app.get('/docs', (req: express.Request, res: express.Response, next: express.NextFunction) => {
-  if (!swaggerDocument) {
-    return res.status(503).json({
-      error: 'Documentation Unavailable',
-      message: 'OpenAPI specification could not be loaded',
-      timestamp: Date.now()
-    });
-  }
-  next();
-}, swaggerUi.serve, swaggerUi.setup(swaggerDocument, {
-  customSiteTitle: 'Validator Analytics API Documentation',
-  customfavIcon: '/favicon.ico',
-  customCss: '.swagger-ui .topbar { display: none }',
-  swaggerOptions: {
-    persistAuthorization: true,
-    displayRequestDuration: true,
-    docExpansion: 'none',
-    filter: true,
-    showRequestHeaders: true,
-    tryItOutEnabled: true,
-    supportedSubmitMethods: ['get', 'post', 'put', 'delete', 'patch']
-  }
-}));
 
 // Root endpoint
 app.get('/', (req, res) => {
@@ -1051,14 +680,11 @@ app.get('/', (req, res) => {
     endpoints: {
       // Core Endpoints
       '/health': 'Health check and RPC status',
-      '/docs': 'Interactive API documentation (Swagger UI)',
       '/api/validators': 'Get validator data from on-chain sources',
       
-      // Network Aggregation Endpoints (NEW)
-      '/api/network/stats': 'Network-wide staking overview and Nakamoto coefficient',
-      '/api/validators/compare': 'Compare up to 5 validators side by side',
-      '/api/validators/top': 'Top validators leaderboard with Phase validator flags',
-      '/api/alerts/delinquent': 'Currently delinquent validators with stake at risk',
+      // V1 Revenue Product - Validator Analytics
+      '/api/validator-analytics/v1': 'Enhanced validator analytics with Stakewiz metadata + SVT financial data',
+      '/api/validator-analytics/v1/health': 'Health check for external data sources',
       
       // V2 Deep Analytics Endpoints
       '/api/validators/:voteAccount': 'Get detailed info for a single validator',
@@ -1067,21 +693,10 @@ app.get('/', (req, res) => {
       '/api/stake-accounts/:wallet': 'Get stake accounts for a wallet',
       '/api/websocket/status': 'WebSocket service status and connection info',
       
-      // V1 Revenue Product - Validator Analytics
-      '/api/validator-analytics/v1': 'Enhanced validator analytics with Stakewiz metadata + SVT financial data',
-      '/api/validator-analytics/v1/health': 'Health check for external data sources',
-      
       // WebSocket
       '/ws': 'WebSocket endpoint for real-time validator updates'
     },
     features: {
-      aggregation: [
-        'Network-wide staking statistics with Nakamoto coefficient',
-        'Side-by-side validator comparison (up to 5 validators)',
-        'Top validators leaderboard with Phase validator identification',
-        'Delinquent validator alerts with stake at risk tracking',
-        'Performance scoring and ranking algorithms'
-      ],
       v1: [
         'Stakewiz validator metadata integration',
         'SVT financial data and APY calculations',
@@ -1113,13 +728,7 @@ app.use('*', (req, res) => {
 
 // Error handler
 app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  logger.error('Unhandled error', {
-    component: 'Server',
-    operation: 'error_handler',
-    method: req.method,
-    path: req.path,
-    error: err
-  });
+  console.error('Unhandled error:', err);
   res.status(500).json({
     error: 'Internal Server Error',
     message: 'An unexpected error occurred',
@@ -1129,76 +738,30 @@ app.use((err: Error, req: express.Request, res: express.Response, next: express.
 
 // Only start server if this file is run directly (not imported)
 if (require.main === module) {
-  server.listen(PORT, async () => {
-    logger.info('Validator Analytics API v2 started', {
-      component: 'Server',
-      operation: 'startup',
-      port: PORT,
-      rpcUrl: RPC_URL,
-      endpoints: {
-        documentation: `http://localhost:${PORT}/`,
-        health: `http://localhost:${PORT}/health`,
-        validators: `http://localhost:${PORT}/api/validators`,
-        websocket: `ws://localhost:${PORT}/ws`
-      }
-    });
-    
-    // Initialize cache service
-    try {
-      await cacheService.initialize();
-      cacheService.startCleanupTask();
-      logger.info('Cache service initialized', {
-        component: 'Server',
-        operation: 'cache_init',
-        redisEnabled: !!process.env.REDIS_URL
-      });
-    } catch (error) {
-      logger.error('Cache service initialization failed', {
-        component: 'Server',
-        operation: 'cache_init',
-        error: error instanceof Error ? error : new Error(String(error))
-      });
-    }
+  server.listen(PORT, () => {
+    console.log(`🚀 Validator Analytics API v2 running on port ${PORT}`);
+    console.log(`📡 Using Solana RPC: ${RPC_URL}`);
+    console.log(`🔍 API Documentation: http://localhost:${PORT}/`);
+    console.log(`⚡ Health Check: http://localhost:${PORT}/health`);
+    console.log(`🎯 Validators Endpoint: http://localhost:${PORT}/api/validators`);
+    console.log(`📊 V2 Endpoints: epoch, validator details, history, stake accounts`);
+    console.log(`🔌 WebSocket: ws://localhost:${PORT}/ws`);
     
     // Initialize WebSocket service after server starts
     websocketService = new WebSocketService(server, validatorService);
-    logger.info('WebSocket service initialized', {
-      component: 'Server',
-      operation: 'websocket_init'
-    });
+    console.log(`📡 WebSocket service initialized`);
   });
 
   // Graceful shutdown
-  process.on('SIGTERM', async () => {
-    logger.info('SIGTERM received, shutting down gracefully', {
-      component: 'Server',
-      operation: 'shutdown'
-    });
+  process.on('SIGTERM', () => {
+    console.log('SIGTERM received, shutting down gracefully...');
     
     if (websocketService) {
       websocketService.close();
     }
     
-    // Disconnect cache service
-    try {
-      await cacheService.disconnect();
-      logger.info('Cache service disconnected', {
-        component: 'Server',
-        operation: 'shutdown'
-      });
-    } catch (error) {
-      logger.error('Error disconnecting cache service', {
-        component: 'Server',
-        operation: 'shutdown',
-        error: error instanceof Error ? error : new Error(String(error))
-      });
-    }
-    
     server.close(() => {
-      logger.info('Server closed', {
-        component: 'Server',
-        operation: 'shutdown'
-      });
+      console.log('Server closed');
       process.exit(0);
     });
   });
