@@ -1,0 +1,93 @@
+ * GET /api/validators/compare?validators=A,B,C
+ * Compare up to 5 validators side by side
+ * 
+ * Query Parameters:
+ * - validators: Comma-separated list of vote account addresses (max 5)
+ * 
+ * Returns comparison data including:
+ * - Commission, APY, uptime, skip rate, stake
+ * - Ranked by performance score
+ * - Phase validators flagged
+ */
+app.get('/api/validators/compare', apiLimiter, async (req, res) => {
+  try {
+    const validatorsParam = req.query.validators as string;
+    
+    if (!validatorsParam) {
+      return res.status(400).json({
+        error: 'Missing Required Parameter',
+        message: 'validators parameter is required',
+        example: '/api/validators/compare?validators=vote1,vote2,vote3',
+        timestamp: Date.now()
+      });
+    }
+    
+    const voteAccounts = validatorsParam.split(',').map(v => v.trim()).filter(v => v.length > 0);
+    
+    if (voteAccounts.length === 0) {
+      return res.status(400).json({
+        error: 'Invalid Parameter',
+        message: 'No valid vote accounts provided',
+        timestamp: Date.now()
+      });
+    }
+    
+    if (voteAccounts.length > 5) {
+      return res.status(400).json({
+        error: 'Too Many Validators',
+        message: 'Maximum 5 validators can be compared at once',
+        provided: voteAccounts.length,
+        timestamp: Date.now()
+      });
+    }
+    
+    // Validate vote account format
+    const invalidVoteAccounts = voteAccounts.filter(account => 
+      account.length < 32 || account.length > 44 || !/^[1-9A-HJ-NP-Za-km-z]+$/.test(account)
+    );
+    
+    if (invalidVoteAccounts.length > 0) {
+      return res.status(400).json({
+        error: 'Invalid Vote Account Format',
+        message: 'Vote accounts must be valid 32-44 character base58 strings',
+        invalidAccounts: invalidVoteAccounts,
+        timestamp: Date.now()
+      });
+    }
+    
+    console.log(`Comparing ${voteAccounts.length} validators...`);
+    const startTime = Date.now();
+    
+    const comparison = await validatorService.compareValidators(voteAccounts);
+    
+    const responseTime = Date.now() - startTime;
+    console.log(`Validator comparison response: ${comparison.validators.length} validators, ${responseTime}ms`);
+    
+    res.json({
+      ...comparison,
+      meta: {
+        ...comparison.meta,
+        responseTimeMs: responseTime
+      }
+    });
+    
+  } catch (error) {
+    console.error('Error in /api/validators/compare:', error);
+    
+    let statusCode = 500;
+    let errorMessage = 'Failed to compare validators';
+    
+    if (error instanceof Error) {
+      if (error.message.includes('Connection') || error.message.includes('timeout')) {
+        statusCode = 503;
+        errorMessage = 'Unable to connect to Solana RPC';
+      }
+    }
+    
+    res.status(statusCode).json({
+      error: 'Service Error',
+      message: errorMessage,
+      timestamp: Date.now()
+    });
+  }
+});

@@ -223,6 +223,231 @@ export interface WalletStakeAccountsResponse {
   timestamp: number;
 }
 
+// Network Aggregation Types
+
+/**
+ * Network-wide staking statistics
+ */
+export interface NetworkStats {
+  /** Total number of validators (active + delinquent) */
+  totalValidators: number;
+  
+  /** Number of active validators */
+  activeValidators: number;
+  
+  /** Number of delinquent validators */
+  delinquentValidators: number;
+  
+  /** Total stake across all validators in lamports */
+  totalStake: number;
+  
+  /** Average stake per validator in lamports */
+  averageStake: number;
+  
+  /** Network-wide APY estimate (%) */
+  networkAPY: number;
+  
+  /** Nakamoto coefficient (validators needed for 33% stake) */
+  nakamotoCoefficient: number;
+  
+  /** Current epoch number */
+  epoch: number;
+  
+  /** Slots in current epoch */
+  slotsInEpoch: number;
+  
+  /** Current slot index in epoch */
+  slotIndex: number;
+  
+  /** Epoch progress percentage */
+  epochProgress: number;
+  
+  /** Timestamp when data was collected */
+  timestamp: number;
+}
+
+/**
+ * Validator comparison data
+ */
+export interface ValidatorComparison {
+  /** Vote account public key */
+  voteAccount: string;
+  
+  /** Validator name */
+  name: string | null;
+  
+  /** Commission percentage */
+  commission: number;
+  
+  /** Estimated APY percentage */
+  apy: number;
+  
+  /** Uptime percentage (based on epoch credits) */
+  uptime: number;
+  
+  /** Skip rate percentage */
+  skipRate: number;
+  
+  /** Total stake in lamports */
+  stake: number;
+  
+  /** Performance score (0-100) */
+  performanceScore: number;
+  
+  /** Whether this is a Phase validator */
+  isPhaseValidator: boolean;
+  
+  /** Last vote slot */
+  lastVote: number | null;
+  
+  /** Whether validator is currently delinquent */
+  isDelinquent: boolean;
+}
+
+/**
+ * Validator comparison response
+ */
+export interface ValidatorComparisonResponse {
+  /** Array of compared validators */
+  validators: ValidatorComparison[];
+  
+  /** Validators that were requested but not found */
+  notFound: string[];
+  
+  /** Current epoch */
+  epoch: number;
+  
+  /** Timestamp */
+  timestamp: number;
+  
+  /** Response metadata */
+  meta: {
+    responseTimeMs: number;
+    requestedCount: number;
+    foundCount: number;
+  };
+}
+
+/**
+ * Top validators leaderboard entry
+ */
+export interface TopValidator {
+  /** Vote account public key */
+  voteAccount: string;
+  
+  /** Validator name */
+  name: string | null;
+  
+  /** Commission percentage */
+  commission: number;
+  
+  /** Estimated APY percentage */
+  apy: number;
+  
+  /** Uptime percentage */
+  uptime: number;
+  
+  /** Total stake in lamports */
+  stake: number;
+  
+  /** Stake growth percentage (last epoch) */
+  stakeGrowth: number;
+  
+  /** Performance score */
+  performanceScore: number;
+  
+  /** Whether this is a Phase validator */
+  isPhaseValidator: boolean;
+  
+  /** Ranking position */
+  rank: number;
+}
+
+/**
+ * Top validators response
+ */
+export interface TopValidatorsResponse {
+  /** Array of top validators */
+  validators: TopValidator[];
+  
+  /** Sort criteria used */
+  sortBy: 'apy' | 'uptime' | 'stake';
+  
+  /** Number of validators returned */
+  limit: number;
+  
+  /** Current epoch */
+  epoch: number;
+  
+  /** Timestamp */
+  timestamp: number;
+  
+  /** Response metadata */
+  meta: {
+    responseTimeMs: number;
+    totalValidators: number;
+    phaseValidators: number;
+  };
+}
+
+/**
+ * Delinquent validator alert
+ */
+export interface DelinquentValidator {
+  /** Vote account public key */
+  voteAccount: string;
+  
+  /** Validator name */
+  name: string | null;
+  
+  /** Last vote slot */
+  lastVote: number | null;
+  
+  /** Slots since last vote */
+  slotsSinceLastVote: number;
+  
+  /** Estimated time since last vote in minutes */
+  minutesSinceLastVote: number;
+  
+  /** Total stake at risk in lamports */
+  stakeAtRisk: number;
+  
+  /** Commission percentage */
+  commission: number;
+  
+  /** Whether this is a Phase validator */
+  isPhaseValidator: boolean;
+}
+
+/**
+ * Delinquent alerts response
+ */
+export interface DelinquentAlertsResponse {
+  /** Array of delinquent validators */
+  delinquentValidators: DelinquentValidator[];
+  
+  /** Total number of delinquent validators */
+  totalDelinquent: number;
+  
+  /** Total stake at risk across all delinquent validators */
+  totalStakeAtRisk: number;
+  
+  /** Current slot */
+  currentSlot: number;
+  
+  /** Current epoch */
+  epoch: number;
+  
+  /** Timestamp */
+  timestamp: number;
+  
+  /** Response metadata */
+  meta: {
+    responseTimeMs: number;
+    phaseValidatorsDelinquent: number;
+  };
+}
+
 // WebSocket Types
 export interface ValidatorUpdateEvent {
   type: 'validator_performance' | 'delinquency_alert' | 'commission_change';
