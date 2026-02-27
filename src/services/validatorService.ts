@@ -24,6 +24,7 @@ import {
   TopValidatorsResponse,
   DelinquentAlertsResponse
 } from '../types/validator';
+import { cacheService, CacheKeys } from './cacheService';
 
 export class ValidatorService {
   private connection: Connection;
@@ -452,9 +453,19 @@ export class ValidatorService {
   }
 
   /**
-   * V2 ENDPOINT: Get current epoch information
+   * V2 ENDPOINT: Get current epoch information (cached)
    */
   async getCurrentEpochInfo(): Promise<CurrentEpochInfo> {
+    return cacheService.cacheOrFetch(
+      CacheKeys.EPOCH_INFO,
+      () => this.getCurrentEpochInfoFromRPC()
+    );
+  }
+
+  /**
+   * Internal method to fetch current epoch info from RPC without caching
+   */
+  private async getCurrentEpochInfoFromRPC(): Promise<CurrentEpochInfo> {
     try {
       console.log('Fetching current epoch info...');
       
@@ -511,9 +522,20 @@ export class ValidatorService {
   }
 
   /**
-   * V2 ENDPOINT: Get stake accounts for a wallet address
+   * V2 ENDPOINT: Get stake accounts for a wallet address (cached)
    */
   async getWalletStakeAccounts(wallet: string): Promise<WalletStakeAccountsResponse> {
+    return cacheService.cacheOrFetch(
+      CacheKeys.WALLET_STAKE_ACCOUNTS,
+      () => this.getWalletStakeAccountsFromRPC(wallet),
+      wallet
+    );
+  }
+
+  /**
+   * Internal method to fetch wallet stake accounts from RPC without caching
+   */
+  private async getWalletStakeAccountsFromRPC(wallet: string): Promise<WalletStakeAccountsResponse> {
     try {
       console.log(`Fetching stake accounts for wallet: ${wallet}`);
       
@@ -722,9 +744,19 @@ export class ValidatorService {
   // New Aggregation Methods
 
   /**
-   * Get network-wide staking statistics
+   * Get network-wide staking statistics (cached)
    */
   async getNetworkStats(): Promise<import('../types/validator').NetworkStats> {
+    return cacheService.cacheOrFetch(
+      CacheKeys.NETWORK_STATS,
+      () => this.getNetworkStatsFromRPC()
+    );
+  }
+
+  /**
+   * Internal method to fetch network stats from RPC without caching
+   */
+  private async getNetworkStatsFromRPC(): Promise<import('../types/validator').NetworkStats> {
     try {
       console.log('Fetching network statistics...');
       

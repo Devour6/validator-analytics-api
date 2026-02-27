@@ -15,6 +15,7 @@ import YAML from 'js-yaml';
 import swaggerUi from 'swagger-ui-express';
 import { ValidatorService } from './services/validatorService';
 import { WebSocketService } from './services/websocketService';
+import { cacheService } from './services/cacheService';
 
 // Load environment variables
 dotenv.config();
@@ -816,6 +817,42 @@ app.get('/api/network/stats', apiLimiter, async (req, res) => {
   }
 });
 
+// Admin endpoints for cache management
+app.post('/admin/cache/flush', async (req, res) => {
+  try {
+    await cacheService.flush();
+    res.json({
+      success: true,
+      message: 'Cache flushed successfully',
+      timestamp: Date.now()
+    });
+  } catch (error) {
+    console.error('Cache flush error:', error);
+    res.status(500).json({
+      error: 'Cache Flush Failed',
+      message: error instanceof Error ? error.message : 'Unknown error',
+      timestamp: Date.now()
+    });
+  }
+});
+
+app.get('/admin/cache/stats', async (req, res) => {
+  try {
+    const stats = await cacheService.getStats();
+    res.json({
+      ...stats,
+      timestamp: Date.now()
+    });
+  } catch (error) {
+    console.error('Cache stats error:', error);
+    res.status(500).json({
+      error: 'Cache Stats Failed',
+      message: error instanceof Error ? error.message : 'Unknown error',
+      timestamp: Date.now()
+    });
+  }
+});
+
 // Load OpenAPI specification
 const openApiPath = path.join(__dirname, '..', 'docs', 'openapi.yaml');
 let swaggerDocument: any = null;
@@ -934,7 +971,7 @@ app.use((err: Error, req: express.Request, res: express.Response, next: express.
 
 // Only start server if this file is run directly (not imported)
 if (require.main === module) {
-  server.listen(PORT, () => {
+  server.listen(PORT, async () => {
     console.log(`🚀 Validator Analytics API v2 running on port ${PORT}`);
     console.log(`📡 Using Solana RPC: ${RPC_URL}`);
     console.log(`🔍 API Documentation: http://localhost:${PORT}/`);
@@ -943,17 +980,34 @@ if (require.main === module) {
     console.log(`📊 V2 Endpoints: epoch, validator details, history, stake accounts`);
     console.log(`🔌 WebSocket: ws://localhost:${PORT}/ws`);
     
+    // Initialize cache service
+    try {
+      await cacheService.initialize();
+      cacheService.startCleanupTask();
+      console.log(`💾 Cache service initialized${process.env.REDIS_URL ? ' with Redis' : ' with in-memory fallback'}`);
+    } catch (error) {
+      console.error('❌ Cache service initialization failed:', error);
+    }
+    
     // Initialize WebSocket service after server starts
     websocketService = new WebSocketService(server, validatorService);
     console.log(`📡 WebSocket service initialized`);
   });
 
   // Graceful shutdown
-  process.on('SIGTERM', () => {
+  process.on('SIGTERM', async () => {
     console.log('SIGTERM received, shutting down gracefully...');
     
     if (websocketService) {
       websocketService.close();
+    }
+    
+    // Disconnect cache service
+    try {
+      await cacheService.disconnect();
+      console.log('Cache service disconnected');
+    } catch (error) {
+      console.error('Error disconnecting cache service:', error);
     }
     
     server.close(() => {
