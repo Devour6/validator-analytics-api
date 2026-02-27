@@ -9,6 +9,10 @@ import dotenv from 'dotenv';
 import rateLimit from 'express-rate-limit';
 import Joi from 'joi';
 import { createServer } from 'http';
+import path from 'path';
+import fs from 'fs';
+import YAML from 'js-yaml';
+import swaggerUi from 'swagger-ui-express';
 import { ValidatorService } from './services/validatorService';
 import { WebSocketService } from './services/websocketService';
 
@@ -812,6 +816,43 @@ app.get('/api/network/stats', apiLimiter, async (req, res) => {
   }
 });
 
+// Load OpenAPI specification
+const openApiPath = path.join(__dirname, '..', 'docs', 'openapi.yaml');
+let swaggerDocument: any = null;
+
+try {
+  const openApiContent = fs.readFileSync(openApiPath, 'utf8');
+  swaggerDocument = YAML.load(openApiContent) as any;
+  console.log('✅ OpenAPI specification loaded successfully');
+} catch (error) {
+  console.error('❌ Failed to load OpenAPI specification:', error);
+}
+
+// Swagger UI Documentation endpoint
+app.get('/docs', (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (!swaggerDocument) {
+    return res.status(503).json({
+      error: 'Documentation Unavailable',
+      message: 'OpenAPI specification could not be loaded',
+      timestamp: Date.now()
+    });
+  }
+  next();
+}, swaggerUi.serve, swaggerUi.setup(swaggerDocument, {
+  customSiteTitle: 'Validator Analytics API Documentation',
+  customfavIcon: '/favicon.ico',
+  customCss: '.swagger-ui .topbar { display: none }',
+  swaggerOptions: {
+    persistAuthorization: true,
+    displayRequestDuration: true,
+    docExpansion: 'none',
+    filter: true,
+    showRequestHeaders: true,
+    tryItOutEnabled: true,
+    supportedSubmitMethods: ['get', 'post', 'put', 'delete', 'patch']
+  }
+}));
+
 // Root endpoint
 app.get('/', (req, res) => {
   res.json({
@@ -821,6 +862,7 @@ app.get('/', (req, res) => {
     endpoints: {
       // Core Endpoints
       '/health': 'Health check and RPC status',
+      '/docs': 'Interactive API documentation (Swagger UI)',
       '/api/validators': 'Get validator data from on-chain sources',
       
       // Network Aggregation Endpoints (NEW)

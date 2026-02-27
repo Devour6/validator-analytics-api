@@ -303,6 +303,34 @@ describe('API Endpoints', () => {
     }, 10000);
   });
 
+  describe('GET /docs', () => {
+    it('should return API documentation page', async () => {
+      const response = await request(app).get('/docs');
+
+      expect(response.status).toBe(200);
+      expect(response.type).toMatch(/text\/html/);
+      expect(response.text).toContain('swagger-ui-bundle.js');
+      expect(response.text).toContain('Validator Analytics API Documentation');
+    });
+
+    it('should handle redirects to docs/', async () => {
+      const response = await request(app).get('/docs/');
+
+      expect(response.status).toBe(200);
+      expect(response.type).toMatch(/text\/html/);
+    });
+
+    it('should serve swagger assets', async () => {
+      // Test that swagger-ui static assets are served
+      const response = await request(app).get('/docs');
+      expect(response.status).toBe(200);
+      
+      // Verify swagger UI is properly initialized
+      expect(response.text).toContain('swagger-ui-bundle');
+      expect(response.text).toContain('swagger-ui');
+    });
+  });
+
   describe('404 Handler', () => {
     it('should return 404 for non-existent endpoints', async () => {
       const response = await request(app).get('/nonexistent');
