@@ -35,7 +35,7 @@ describe('API Endpoints', () => {
       expect(response.status).toBe(200);
       expect(response.body).toMatchObject({
         service: 'Validator Analytics API',
-        version: '1.0.0',
+        version: '2.0.0',
         description: expect.any(String),
         endpoints: expect.any(Object),
       });
