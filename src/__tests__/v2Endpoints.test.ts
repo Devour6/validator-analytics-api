@@ -96,8 +96,8 @@ describe('V2 Deep Analytics Endpoints', () => {
     });
 
     test('should return 404 for non-existent validator', async () => {
-      // Use a valid format but non-existent vote account
-      const nonExistentVoteAccount = '1111111111111111111111111111111111111111111';
+      // Use a valid format but non-existent vote account (valid base58, 44 chars)
+      const nonExistentVoteAccount = '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM';
       
       const response = await request(app)
         .get(`/api/validators/${nonExistentVoteAccount}`)

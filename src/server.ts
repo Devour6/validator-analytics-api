@@ -78,8 +78,8 @@ const validatorQuerySchema = Joi.object({
 });
 
 // V2 validation schemas
-const voteAccountSchema = Joi.string().length(44).required(); // Base58 public key length
-const walletAddressSchema = Joi.string().length(44).required();
+const voteAccountSchema = Joi.string().length(44).pattern(/^[1-9A-HJ-NP-Za-km-z]+$/).required(); // Valid base58 characters and length
+const walletAddressSchema = Joi.string().length(44).pattern(/^[1-9A-HJ-NP-Za-km-z]+$/).required();
 
 // Validation middleware
 const validateQuery = (schema: Joi.ObjectSchema) => {
@@ -307,7 +307,10 @@ app.get('/api/validators/:voteAccount', apiLimiter, async (req, res) => {
     let errorMessage = 'Failed to fetch validator detail';
     
     if (error instanceof Error) {
-      if (error.message.includes('not found')) {
+      // Check for various "not found" patterns in the error message
+      if (error.message.includes('not found') || 
+          (error.message.includes('Validator') && error.message.includes('not found')) ||
+          error.message.match(/Validator .* not found/)) {
         statusCode = 404;
         errorMessage = 'Validator not found';
       } else if (error.message.includes('Connection') || error.message.includes('timeout')) {
@@ -372,7 +375,10 @@ app.get('/api/validators/:voteAccount/history', apiLimiter, async (req, res) => 
     let errorMessage = 'Failed to fetch validator history';
     
     if (error instanceof Error) {
-      if (error.message.includes('not found')) {
+      // Check for various "not found" patterns in the error message
+      if (error.message.includes('not found') || 
+          (error.message.includes('Validator') && error.message.includes('not found')) ||
+          error.message.match(/Validator .* not found/)) {
         statusCode = 404;
         errorMessage = 'Validator not found';
       } else if (error.message.includes('Connection') || error.message.includes('timeout')) {
