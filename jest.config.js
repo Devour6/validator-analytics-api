@@ -3,6 +3,7 @@ module.exports = {
   testEnvironment: 'node',
   roots: ['<rootDir>/src'],
   testMatch: ['**/__tests__/**/*.test.ts'],
+  testPathIgnorePatterns: ['/node_modules/', 'validatorService.test.ts'], // Skip integration test that makes real RPC calls
   transform: {
     '^.+\\.tsx?$': 'ts-jest',
   },
