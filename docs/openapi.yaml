@@ -1,0 +1,1086 @@
+openapi: 3.0.3
+info:
+  title: Validator Analytics API
+  description: |
+    Solana Validator Analytics API - Comprehensive on-chain validator data and analytics.
+    
+    This API provides real-time and historical data about Solana validators, including:
+    - Validator information and metadata
+    - Stake and commission data
+    - Performance metrics and history
+    - Network statistics
+    - Delinquent validator alerts
+    
+    All data is sourced directly from on-chain sources using RPC calls.
+  version: 1.0.0
+  contact:
+    name: Phase Labs
+    url: https://phaselabs.io
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: https://validator-analytics-api.phaselabs.io
+    description: Production server
+  - url: http://localhost:3001
+    description: Development server
+
+paths:
+  /health:
+    get:
+      summary: Health Check
+      description: Check the health status of the API service and Solana RPC connection
+      operationId: getHealthCheck
+      tags:
+        - System
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '503':
+          description: Service is unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/validators:
+    get:
+      summary: Get Validators
+      description: |
+        Returns comprehensive validator data from on-chain sources.
+        Combines data from getVoteAccounts RPC call and validator-info program.
+      operationId: getValidators
+      tags:
+        - Validators
+      parameters:
+        - name: limit
+          in: query
+          description: Maximum number of validators to return
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            example: 100
+        - name: sortBy
+          in: query
+          description: Field to sort validators by
+          required: false
+          schema:
+            type: string
+            enum: [stake, commission, name]
+            default: stake
+        - name: order
+          in: query
+          description: Sort order
+          required: false
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+        - name: activeOnly
+          in: query
+          description: Only return active validators
+          required: false
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidatorInfoResponse'
+        '400':
+          description: Invalid query parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationErrorResponse'
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RateLimitResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/validators/{voteAccount}:
+    get:
+      summary: Get Validator Details
+      description: Get detailed information about a specific validator by vote account
+      operationId: getValidatorDetails
+      tags:
+        - Validators
+      parameters:
+        - name: voteAccount
+          in: path
+          description: Validator vote account public key (base58 encoded)
+          required: true
+          schema:
+            type: string
+            pattern: '^[1-9A-HJ-NP-Za-km-z]+$'
+            minLength: 32
+            maxLength: 44
+            example: 7K8DVxtNJGnMtUY1CQJT5jcs8sFGSZTDiG7kowvFpECh
+      responses:
+        '200':
+          description: Validator details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidatorDetailResponse'
+        '400':
+          description: Invalid vote account parameter
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationErrorResponse'
+        '404':
+          description: Validator not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RateLimitResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/validators/{voteAccount}/history:
+    get:
+      summary: Get Validator History
+      description: Get historical performance data for a specific validator
+      operationId: getValidatorHistory
+      tags:
+        - Validators
+      parameters:
+        - name: voteAccount
+          in: path
+          description: Validator vote account public key (base58 encoded)
+          required: true
+          schema:
+            type: string
+            pattern: '^[1-9A-HJ-NP-Za-km-z]+$'
+            minLength: 32
+            maxLength: 44
+            example: 7K8DVxtNJGnMtUY1CQJT5jcs8sFGSZTDiG7kowvFpECh
+        - name: epochs
+          in: query
+          description: Number of epochs of history to return
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+      responses:
+        '200':
+          description: Validator historical data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidatorHistoryResponse'
+        '400':
+          description: Invalid parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationErrorResponse'
+        '404':
+          description: Validator not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RateLimitResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/epoch/current:
+    get:
+      summary: Get Current Epoch
+      description: Get information about the current Solana epoch
+      operationId: getCurrentEpoch
+      tags:
+        - Network
+      responses:
+        '200':
+          description: Current epoch information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EpochResponse'
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RateLimitResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/stake-accounts/{wallet}:
+    get:
+      summary: Get Stake Accounts
+      description: Get stake account information for a specific wallet address
+      operationId: getStakeAccounts
+      tags:
+        - Stakes
+      parameters:
+        - name: wallet
+          in: path
+          description: Wallet address (base58 encoded public key)
+          required: true
+          schema:
+            type: string
+            pattern: '^[1-9A-HJ-NP-Za-km-z]+$'
+            minLength: 32
+            maxLength: 44
+            example: 9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM
+      responses:
+        '200':
+          description: Stake accounts for the wallet
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StakeAccountsResponse'
+        '400':
+          description: Invalid wallet address
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationErrorResponse'
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RateLimitResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/network/stats:
+    get:
+      summary: Get Network Statistics
+      description: Get comprehensive Solana network statistics and metrics
+      operationId: getNetworkStats
+      tags:
+        - Network
+      responses:
+        '200':
+          description: Network statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NetworkStatsResponse'
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RateLimitResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/validators/compare:
+    get:
+      summary: Compare Validators
+      description: Compare performance metrics between multiple validators
+      operationId: compareValidators
+      tags:
+        - Validators
+      parameters:
+        - name: validators
+          in: query
+          description: Comma-separated list of validator vote accounts to compare
+          required: true
+          schema:
+            type: string
+            example: "7K8DVxtNJGnMtUY1CQJT5jcs8sFGSZTDiG7kowvFpECh,5D1fNXzvv5NjV1ysLjirC4WY92RNsVH18vjmcszZd8on"
+          style: form
+          explode: false
+      responses:
+        '200':
+          description: Validator comparison results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidatorComparisonResponse'
+        '400':
+          description: Invalid validator addresses or missing validators parameter
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationErrorResponse'
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RateLimitResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/validators/top:
+    get:
+      summary: Get Top Validators
+      description: Get the top performing validators based on various metrics
+      operationId: getTopValidators
+      tags:
+        - Validators
+      parameters:
+        - name: metric
+          in: query
+          description: Metric to rank validators by
+          required: false
+          schema:
+            type: string
+            enum: [stake, performance, commission, apy]
+            default: stake
+        - name: limit
+          in: query
+          description: Number of top validators to return
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+      responses:
+        '200':
+          description: Top validators
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TopValidatorsResponse'
+        '400':
+          description: Invalid query parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationErrorResponse'
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RateLimitResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/alerts/delinquent:
+    get:
+      summary: Get Delinquent Validators
+      description: Get list of validators that are currently delinquent (not voting)
+      operationId: getDelinquentValidators
+      tags:
+        - Alerts
+      responses:
+        '200':
+          description: List of delinquent validators
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DelinquentValidatorsResponse'
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RateLimitResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    ValidatorInfo:
+      type: object
+      description: Basic validator information
+      required:
+        - identity
+        - stake
+        - commission
+        - activatedStake
+        - epochVoteAccount
+        - nodePubkey
+        - epochCredits
+      properties:
+        identity:
+          type: string
+          description: Validator vote account public key
+          example: "7K8DVxtNJGnMtUY1CQJT5jcs8sFGSZTDiG7kowvFpECh"
+        name:
+          type: string
+          nullable: true
+          description: Validator name from validator-info program
+          example: "Phase Labs Validator"
+        stake:
+          type: number
+          description: Delegated stake amount in lamports
+          example: 50000000000000
+        commission:
+          type: number
+          description: Commission percentage (0-100)
+          minimum: 0
+          maximum: 100
+          example: 5
+        activatedStake:
+          type: number
+          description: Activated stake amount in lamports
+          example: 48000000000000
+        epochVoteAccount:
+          type: boolean
+          description: Whether the vote account is active in current epoch
+          example: true
+        nodePubkey:
+          type: string
+          description: Validator node public key
+          example: "5D1fNXzvv5NjV1ysLjirC4WY92RNsVH18vjmcszZd8on"
+        rootSlot:
+          type: number
+          nullable: true
+          description: Root slot for this validator
+          example: 123456789
+        lastVote:
+          type: number
+          nullable: true
+          description: Last vote slot for this validator
+          example: 123456790
+        epochCredits:
+          type: array
+          description: Credits for recent epochs
+          items:
+            type: array
+            description: Epoch credits tuple [epoch, credits, previous_credits]
+            items:
+              type: number
+            minItems: 3
+            maxItems: 3
+          example: [[400, 432000, 430000], [401, 434000, 432000]]
+
+    ValidatorInfoResponse:
+      type: object
+      description: Response containing validator information
+      required:
+        - validators
+        - epoch
+        - totalValidators
+        - totalStake
+        - timestamp
+      properties:
+        validators:
+          type: array
+          description: Array of validator information
+          items:
+            $ref: '#/components/schemas/ValidatorInfo'
+        epoch:
+          type: number
+          description: Current epoch number
+          example: 401
+        totalValidators:
+          type: number
+          description: Total number of validators
+          example: 1500
+        totalStake:
+          type: number
+          description: Total active stake across all validators
+          example: 400000000000000000
+        timestamp:
+          type: number
+          description: Timestamp of data fetch (Unix timestamp in milliseconds)
+          example: 1645123456789
+
+    ValidatorDetailResponse:
+      type: object
+      description: Detailed validator information
+      required:
+        - validator
+        - timestamp
+      properties:
+        validator:
+          type: object
+          required:
+            - voteAccount
+            - identity
+            - commission
+            - activatedStake
+            - epochVoteAccount
+            - delinquent
+            - epochCreditsHistory
+            - estimatedApy
+            - skipRate
+            - currentEpochPerformance
+          properties:
+            voteAccount:
+              type: string
+              description: Validator vote account public key
+              example: "7K8DVxtNJGnMtUY1CQJT5jcs8sFGSZTDiG7kowvFpECh"
+            identity:
+              type: string
+              description: Validator identity (node) public key
+              example: "5D1fNXzvv5NjV1ysLjirC4WY92RNsVH18vjmcszZd8on"
+            name:
+              type: string
+              nullable: true
+              description: Validator name from validator-info program
+              example: "Phase Labs Validator"
+            commission:
+              type: number
+              description: Commission percentage (0-100)
+              example: 5
+            lastVote:
+              type: number
+              nullable: true
+              description: Last vote slot
+              example: 123456790
+            rootSlot:
+              type: number
+              nullable: true
+              description: Root slot
+              example: 123456789
+            activatedStake:
+              type: number
+              description: Activated stake amount in lamports
+              example: 48000000000000
+            epochVoteAccount:
+              type: boolean
+              description: Whether the vote account is active in current epoch
+              example: true
+            delinquent:
+              type: boolean
+              description: Is currently delinquent
+              example: false
+            epochCreditsHistory:
+              type: array
+              description: Epoch credits history (last 10 epochs)
+              items:
+                type: object
+                properties:
+                  epoch:
+                    type: number
+                  credits:
+                    type: number
+                  previousCredits:
+                    type: number
+            estimatedApy:
+              type: number
+              description: Estimated APY based on recent performance
+              example: 6.8
+            skipRate:
+              type: number
+              description: Skip rate percentage
+              example: 2.5
+            currentEpochPerformance:
+              type: object
+              description: Current epoch performance metrics
+              properties:
+                creditsEarned:
+                  type: number
+                  example: 2000
+                slotsVoted:
+                  type: number
+                  example: 2050
+                totalSlots:
+                  type: number
+                  example: 2100
+                voteSuccessRate:
+                  type: number
+                  example: 97.6
+        timestamp:
+          type: number
+          description: Timestamp of data fetch
+          example: 1645123456789
+
+    ValidatorHistoryResponse:
+      type: object
+      description: Historical validator performance data
+      required:
+        - voteAccount
+        - history
+        - timestamp
+      properties:
+        voteAccount:
+          type: string
+          description: Validator vote account public key
+          example: "7K8DVxtNJGnMtUY1CQJT5jcs8sFGSZTDiG7kowvFpECh"
+        history:
+          type: array
+          description: Historical performance data by epoch
+          items:
+            type: object
+            properties:
+              epoch:
+                type: number
+                example: 400
+              credits:
+                type: number
+                example: 432000
+              stake:
+                type: number
+                example: 50000000000000
+              commission:
+                type: number
+                example: 5
+              skipRate:
+                type: number
+                example: 2.1
+              apy:
+                type: number
+                example: 6.9
+        timestamp:
+          type: number
+          description: Timestamp of data fetch
+          example: 1645123456789
+
+    EpochResponse:
+      type: object
+      description: Current epoch information
+      required:
+        - epoch
+        - slotIndex
+        - slotsInEpoch
+        - absoluteSlot
+        - blockHeight
+        - timestamp
+      properties:
+        epoch:
+          type: number
+          description: Current epoch number
+          example: 401
+        slotIndex:
+          type: number
+          description: Current slot within the epoch
+          example: 125000
+        slotsInEpoch:
+          type: number
+          description: Total slots in current epoch
+          example: 432000
+        absoluteSlot:
+          type: number
+          description: Current absolute slot number
+          example: 173125000
+        blockHeight:
+          type: number
+          description: Current block height
+          example: 173000000
+        timestamp:
+          type: number
+          description: Timestamp of data fetch
+          example: 1645123456789
+
+    StakeAccountsResponse:
+      type: object
+      description: Stake accounts information for a wallet
+      required:
+        - wallet
+        - stakeAccounts
+        - totalStaked
+        - timestamp
+      properties:
+        wallet:
+          type: string
+          description: Wallet address
+          example: "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"
+        stakeAccounts:
+          type: array
+          description: Array of stake account information
+          items:
+            type: object
+            properties:
+              address:
+                type: string
+                description: Stake account address
+                example: "4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R"
+              balance:
+                type: number
+                description: Stake account balance in lamports
+                example: 1000000000
+              state:
+                type: string
+                description: Stake account state
+                enum: [initialized, delegated, inactive]
+                example: "delegated"
+              validator:
+                type: string
+                nullable: true
+                description: Validator vote account if delegated
+                example: "7K8DVxtNJGnMtUY1CQJT5jcs8sFGSZTDiG7kowvFpECh"
+              activationEpoch:
+                type: number
+                nullable: true
+                description: Epoch when stake was activated
+                example: 398
+              deactivationEpoch:
+                type: number
+                nullable: true
+                description: Epoch when stake was deactivated
+                example: null
+        totalStaked:
+          type: number
+          description: Total staked amount across all accounts in lamports
+          example: 5000000000
+        timestamp:
+          type: number
+          description: Timestamp of data fetch
+          example: 1645123456789
+
+    NetworkStatsResponse:
+      type: object
+      description: Comprehensive network statistics
+      required:
+        - epoch
+        - totalValidators
+        - totalStake
+        - averageValidatorStake
+        - averageCommission
+        - delinquentValidators
+        - activeValidators
+        - timestamp
+      properties:
+        epoch:
+          type: number
+          description: Current epoch number
+          example: 401
+        totalValidators:
+          type: number
+          description: Total number of validators
+          example: 1500
+        totalStake:
+          type: number
+          description: Total stake across all validators in lamports
+          example: 400000000000000000
+        averageValidatorStake:
+          type: number
+          description: Average stake per validator in lamports
+          example: 266666666666666
+        averageCommission:
+          type: number
+          description: Average commission percentage across all validators
+          example: 7.2
+        delinquentValidators:
+          type: number
+          description: Number of delinquent validators
+          example: 15
+        activeValidators:
+          type: number
+          description: Number of active validators
+          example: 1485
+        inflationRate:
+          type: number
+          description: Current network inflation rate
+          example: 8.5
+        epochProgress:
+          type: number
+          description: Progress through current epoch (0-1)
+          example: 0.65
+        timestamp:
+          type: number
+          description: Timestamp of data fetch
+          example: 1645123456789
+
+    ValidatorComparisonResponse:
+      type: object
+      description: Comparison results for multiple validators
+      required:
+        - validators
+        - comparison
+        - timestamp
+      properties:
+        validators:
+          type: array
+          description: Array of validators being compared
+          items:
+            $ref: '#/components/schemas/ValidatorInfo'
+        comparison:
+          type: object
+          description: Comparison metrics
+          properties:
+            stakeRanking:
+              type: array
+              description: Validators ranked by stake
+              items:
+                type: string
+            performanceRanking:
+              type: array
+              description: Validators ranked by performance
+              items:
+                type: string
+            commissionRanking:
+              type: array
+              description: Validators ranked by commission (lowest first)
+              items:
+                type: string
+            insights:
+              type: array
+              description: Key insights from the comparison
+              items:
+                type: string
+        timestamp:
+          type: number
+          description: Timestamp of data fetch
+          example: 1645123456789
+
+    TopValidatorsResponse:
+      type: object
+      description: Top performing validators
+      required:
+        - metric
+        - validators
+        - timestamp
+      properties:
+        metric:
+          type: string
+          description: Metric used for ranking
+          example: "stake"
+        validators:
+          type: array
+          description: Array of top validators
+          items:
+            allOf:
+              - $ref: '#/components/schemas/ValidatorInfo'
+              - type: object
+                properties:
+                  rank:
+                    type: number
+                    description: Ranking position
+                    example: 1
+        timestamp:
+          type: number
+          description: Timestamp of data fetch
+          example: 1645123456789
+
+    DelinquentValidatorsResponse:
+      type: object
+      description: List of delinquent validators
+      required:
+        - delinquentValidators
+        - totalDelinquent
+        - timestamp
+      properties:
+        delinquentValidators:
+          type: array
+          description: Array of delinquent validator information
+          items:
+            type: object
+            properties:
+              voteAccount:
+                type: string
+                description: Validator vote account public key
+                example: "7K8DVxtNJGnMtUY1CQJT5jcs8sFGSZTDiG7kowvFpECh"
+              name:
+                type: string
+                nullable: true
+                description: Validator name
+                example: "Example Validator"
+              lastVote:
+                type: number
+                nullable: true
+                description: Last vote slot
+                example: 123456780
+              slotsBehind:
+                type: number
+                description: Number of slots behind current
+                example: 150
+              stake:
+                type: number
+                description: Activated stake amount
+                example: 50000000000000
+              commission:
+                type: number
+                description: Commission percentage
+                example: 5
+        totalDelinquent:
+          type: number
+          description: Total number of delinquent validators
+          example: 15
+        timestamp:
+          type: number
+          description: Timestamp of data fetch
+          example: 1645123456789
+
+    HealthResponse:
+      type: object
+      description: Health check response
+      required:
+        - status
+        - service
+        - version
+        - timestamp
+      properties:
+        status:
+          type: string
+          enum: [ok, error]
+          description: Overall service status
+          example: "ok"
+        service:
+          type: string
+          description: Service name
+          example: "validator-analytics-api"
+        version:
+          type: string
+          description: API version
+          example: "1.0.0"
+        timestamp:
+          type: number
+          description: Health check timestamp
+          example: 1645123456789
+        solana:
+          type: object
+          description: Solana RPC health information
+          properties:
+            connected:
+              type: boolean
+              example: true
+            version:
+              type: string
+              example: "1.14.14"
+            slot:
+              type: number
+              example: 173125000
+
+    ErrorResponse:
+      type: object
+      description: Standard error response
+      required:
+        - error
+        - message
+      properties:
+        error:
+          type: string
+          description: Error type
+          example: "Validator Not Found"
+        message:
+          type: string
+          description: Human-readable error message
+          example: "The specified validator was not found"
+        timestamp:
+          type: number
+          description: Error timestamp
+          example: 1645123456789
+
+    ValidationErrorResponse:
+      type: object
+      description: Validation error response
+      required:
+        - error
+        - message
+        - details
+        - timestamp
+      properties:
+        error:
+          type: string
+          description: Error type
+          example: "Invalid Query Parameters"
+        message:
+          type: string
+          description: Human-readable error message
+          example: "Request contains invalid parameters"
+        details:
+          type: array
+          description: Detailed validation errors
+          items:
+            type: object
+            properties:
+              field:
+                type: string
+                description: Field name that failed validation
+                example: "limit"
+              message:
+                type: string
+                description: Validation error message
+                example: "limit must be a positive integer"
+              value:
+                description: Invalid value that was provided
+                example: -1
+        timestamp:
+          type: number
+          description: Error timestamp
+          example: 1645123456789
+
+    RateLimitResponse:
+      type: object
+      description: Rate limit exceeded response
+      required:
+        - error
+        - message
+        - retryAfter
+      properties:
+        error:
+          type: string
+          description: Error type
+          example: "Too Many Requests"
+        message:
+          type: string
+          description: Rate limit message
+          example: "Rate limit exceeded. Please try again later."
+        retryAfter:
+          type: string
+          description: Time to wait before retrying
+          example: "1 minute"
+
+tags:
+  - name: System
+    description: System health and status endpoints
+  - name: Validators
+    description: Validator information and analytics
+  - name: Network
+    description: Network-wide statistics and information
+  - name: Stakes
+    description: Stake account information
+  - name: Alerts
+    description: Validator alerts and monitoring
+
+security: []
