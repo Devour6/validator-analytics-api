@@ -5,6 +5,14 @@
 
 import { createClient, RedisClientType } from 'redis';
 
+/**
+ * Cache key configuration constants
+ */
+export const CACHE_CONFIG = {
+  KEY_PREFIX: 'validator_analytics',
+  SEPARATOR: ':',
+} as const;
+
 export interface CacheStats {
   hits: number;
   misses: number;
@@ -118,12 +126,15 @@ export class CacheService {
    * Build cache key with prefix
    */
   private buildKey(keyType: CacheKeys, identifier?: string): string {
-    const baseKey = `validator_analytics:${keyType}`;
-    return identifier ? `${baseKey}:${identifier}` : baseKey;
+    const baseKey = `${CACHE_CONFIG.KEY_PREFIX}${CACHE_CONFIG.SEPARATOR}${keyType}`;
+    return identifier ? `${baseKey}${CACHE_CONFIG.SEPARATOR}${identifier}` : baseKey;
   }
 
   /**
    * Get from cache with type safety
+   * @param keyType Cache key type from CacheKeys enum
+   * @param identifier Optional identifier to append to the key
+   * @returns Cached data or null if not found/error occurred
    */
   async get<T>(keyType: CacheKeys, identifier?: string): Promise<T | null> {
     const key = this.buildKey(keyType, identifier);
@@ -131,10 +142,16 @@ export class CacheService {
     try {
       // Try Redis first if available
       if (this.isRedisConnected && this.redisClient) {
-        const redisValue = await this.redisClient.get(key);
-        if (redisValue !== null) {
-          this.stats.hits++;
-          return JSON.parse(redisValue);
+        try {
+          const redisValue = await this.redisClient.get(key);
+          if (redisValue !== null) {
+            this.stats.hits++;
+            return JSON.parse(redisValue);
+          }
+        } catch (redisError) {
+          console.error(`Redis get error for key ${key}:`, redisError);
+          this.isRedisConnected = false;
+          // Gracefully fall through to in-memory cache
         }
       }
 
@@ -163,6 +180,10 @@ export class CacheService {
 
   /**
    * Set cache value with TTL
+   * @param keyType Cache key type from CacheKeys enum
+   * @param value Value to cache
+   * @param identifier Optional identifier to append to the key
+   * @param ttlSeconds Time to live in seconds, defaults to predefined TTL for key type
    */
   async set<T>(
     keyType: CacheKeys, 
@@ -178,7 +199,13 @@ export class CacheService {
 
       // Set in Redis if available
       if (this.isRedisConnected && this.redisClient) {
-        await this.redisClient.setEx(key, ttl, serializedValue);
+        try {
+          await this.redisClient.setEx(key, ttl, serializedValue);
+        } catch (redisError) {
+          console.error(`Redis set error for key ${key}:`, redisError);
+          this.isRedisConnected = false;
+          // Continue to set in memory cache as fallback
+        }
       }
 
       // Set in memory cache if enabled
@@ -195,6 +222,8 @@ export class CacheService {
 
   /**
    * Delete specific cache key
+   * @param keyType Cache key type from CacheKeys enum
+   * @param identifier Optional identifier to append to the key
    */
   async delete(keyType: CacheKeys, identifier?: string): Promise<void> {
     const key = this.buildKey(keyType, identifier);
@@ -202,7 +231,13 @@ export class CacheService {
     try {
       // Delete from Redis
       if (this.isRedisConnected && this.redisClient) {
-        await this.redisClient.del(key);
+        try {
+          await this.redisClient.del(key);
+        } catch (redisError) {
+          console.error(`Redis delete error for key ${key}:`, redisError);
+          this.isRedisConnected = false;
+          // Continue to delete from memory cache
+        }
       }
 
       // Delete from memory cache
@@ -214,6 +249,8 @@ export class CacheService {
 
   /**
    * Delete all keys matching pattern
+   * @param pattern Pattern to match for deletion
+   * @returns Number of keys deleted
    */
   async deletePattern(pattern: string): Promise<number> {
     let deletedCount = 0;
@@ -221,10 +258,16 @@ export class CacheService {
     try {
       // Delete from Redis using pattern
       if (this.isRedisConnected && this.redisClient) {
-        const keys = await this.redisClient.keys(`validator_analytics:${pattern}*`);
-        if (keys.length > 0) {
-          await this.redisClient.del(keys);
-          deletedCount += keys.length;
+        try {
+          const keys = await this.redisClient.keys(`${CACHE_CONFIG.KEY_PREFIX}${CACHE_CONFIG.SEPARATOR}${pattern}*`);
+          if (keys.length > 0) {
+            await this.redisClient.del(keys);
+            deletedCount += keys.length;
+          }
+        } catch (redisError) {
+          console.error(`Redis delete pattern error for ${pattern}:`, redisError);
+          this.isRedisConnected = false;
+          // Continue to delete from memory cache
         }
       }
 
@@ -242,13 +285,19 @@ export class CacheService {
   }
 
   /**
-   * Flush all cache data
+   * Flush all cache data from both Redis and memory cache
    */
   async flush(): Promise<void> {
     try {
       // Flush Redis
       if (this.isRedisConnected && this.redisClient) {
-        await this.redisClient.flushDb();
+        try {
+          await this.redisClient.flushDb();
+        } catch (redisError) {
+          console.error('Redis flush error:', redisError);
+          this.isRedisConnected = false;
+          // Continue to flush memory cache
+        }
       }
 
       // Flush memory cache
@@ -265,7 +314,8 @@ export class CacheService {
   }
 
   /**
-   * Get cache statistics
+   * Get cache statistics including hits, misses, hit rate, and memory usage
+   * @returns Promise resolving to cache statistics
    */
   async getStats(): Promise<CacheStats> {
     const totalRequests = this.stats.hits + this.stats.misses;
@@ -276,14 +326,20 @@ export class CacheService {
 
     try {
       if (this.isRedisConnected && this.redisClient) {
-        const redisKeys = await this.redisClient.keys('validator_analytics:*');
-        totalKeys += redisKeys.length;
-        
-        // Get Redis memory usage
-        const info = await this.redisClient.info('memory');
-        const memoryMatch = info.match(/used_memory:(\d+)/);
-        if (memoryMatch) {
-          memoryUsage = parseInt(memoryMatch[1]);
+        try {
+          const redisKeys = await this.redisClient.keys(`${CACHE_CONFIG.KEY_PREFIX}${CACHE_CONFIG.SEPARATOR}*`);
+          totalKeys += redisKeys.length;
+          
+          // Get Redis memory usage
+          const info = await this.redisClient.info('memory');
+          const memoryMatch = info.match(/used_memory:(\d+)/);
+          if (memoryMatch) {
+            memoryUsage = parseInt(memoryMatch[1]);
+          }
+        } catch (redisError) {
+          console.error('Redis stats error:', redisError);
+          this.isRedisConnected = false;
+          // Continue with memory cache stats only
         }
       }
     } catch (error) {
@@ -301,7 +357,12 @@ export class CacheService {
   }
 
   /**
-   * Cache-or-fetch pattern helper
+   * Cache-or-fetch pattern helper that retrieves from cache or fetches fresh data
+   * @param keyType Cache key type from CacheKeys enum
+   * @param fetchFunction Function to call if cache miss occurs
+   * @param identifier Optional identifier to append to the key
+   * @param ttlSeconds Time to live in seconds for the cached result
+   * @returns Promise resolving to cached or freshly fetched data
    */
   async cacheOrFetch<T>(
     keyType: CacheKeys,
@@ -346,12 +407,17 @@ export class CacheService {
   }
 
   /**
-   * Gracefully disconnect
+   * Gracefully disconnect from Redis and clear memory cache
    */
   async disconnect(): Promise<void> {
     if (this.redisClient) {
-      await this.redisClient.disconnect();
-      this.redisClient = null;
+      try {
+        await this.redisClient.disconnect();
+      } catch (error) {
+        console.error('Error disconnecting Redis client:', error);
+      } finally {
+        this.redisClient = null;
+      }
     }
     this.inMemoryCache.clear();
     this.isRedisConnected = false;

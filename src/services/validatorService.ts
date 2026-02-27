@@ -467,8 +467,6 @@ export class ValidatorService {
    */
   private async getCurrentEpochInfoFromRPC(): Promise<CurrentEpochInfo> {
     try {
-      console.log('Fetching current epoch info...');
-      
       const [epochInfo, slot] = await Promise.all([
         Promise.race([
           this.connection.getEpochInfo(),

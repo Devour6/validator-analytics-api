@@ -11,7 +11,7 @@ import Joi from 'joi';
 import { createServer } from 'http';
 import path from 'path';
 import fs from 'fs';
-import YAML from 'js-yaml';
+import YAML from 'yaml';
 import swaggerUi from 'swagger-ui-express';
 import { ValidatorService } from './services/validatorService';
 import { WebSocketService } from './services/websocketService';
@@ -859,7 +859,7 @@ let swaggerDocument: any = null;
 
 try {
   const openApiContent = fs.readFileSync(openApiPath, 'utf8');
-  swaggerDocument = YAML.load(openApiContent) as any;
+  swaggerDocument = YAML.parse(openApiContent) as any;
   console.log('✅ OpenAPI specification loaded successfully');
 } catch (error) {
   console.error('❌ Failed to load OpenAPI specification:', error);

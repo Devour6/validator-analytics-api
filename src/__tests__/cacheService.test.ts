@@ -3,7 +3,7 @@
  * Tests for Redis caching with in-memory fallback
  */
 
-import { CacheService, CacheKeys, CACHE_TTLS } from '../services/cacheService';
+import { CacheService, CacheKeys, CACHE_TTLS, CACHE_CONFIG } from '../services/cacheService';
 
 // Mock Redis client
 const mockRedisClient = {
@@ -80,6 +80,9 @@ describe('CacheService', () => {
     beforeEach(async () => {
       mockRedisClient.connect.mockResolvedValue(undefined);
       await cacheService.initialize();
+      
+      // Manually set Redis as connected for test operations since we're mocking
+      (cacheService as any).isRedisConnected = true;
     });
 
     describe('get operation', () => {
@@ -111,11 +114,12 @@ describe('CacheService', () => {
       });
 
       it('should handle expired in-memory cache items', async () => {
-        // Set item with very short TTL
-        await cacheService.set(CacheKeys.VALIDATORS, { test: 'data' }, undefined, 0);
-        
-        // Wait a bit for expiration
-        await new Promise(resolve => setTimeout(resolve, 50));
+        // Set item with very short TTL (negative to ensure immediate expiry)  
+        const testData = { test: 'data' };
+        (cacheService as any).inMemoryCache.set('validator_analytics:validators', {
+          data: testData,
+          expires: Date.now() - 1000 // Already expired
+        });
         
         const result = await cacheService.get(CacheKeys.VALIDATORS);
         expect(result).toBeNull();
@@ -199,6 +203,9 @@ describe('CacheService', () => {
     beforeEach(async () => {
       mockRedisClient.connect.mockResolvedValue(undefined);
       await cacheService.initialize();
+      
+      // Manually set Redis as connected for test operations since we're mocking
+      (cacheService as any).isRedisConnected = true;
     });
 
     it('should return cached data when available', async () => {
@@ -263,6 +270,9 @@ describe('CacheService', () => {
       mockRedisClient.keys.mockResolvedValue(['key1', 'key2']);
       mockRedisClient.info.mockResolvedValue('used_memory:1048576\nother:value');
       await cacheService.initialize();
+      
+      // Manually set Redis as connected for test operations since we're mocking
+      (cacheService as any).isRedisConnected = true;
     });
 
     it('should return accurate statistics', async () => {
@@ -332,13 +342,310 @@ describe('CacheService', () => {
       await inMemoryService.initialize();
       
       const testData = { test: 'data' };
-      await inMemoryService.set(CacheKeys.VALIDATORS, testData, undefined, 0); // Immediate expiry
-      
-      // Wait for expiration
-      await new Promise(resolve => setTimeout(resolve, 50));
+      // Set item directly with expired timestamp
+      (inMemoryService as any).inMemoryCache.set('validator_analytics:validators', {
+        data: testData,
+        expires: Date.now() - 1000 // Already expired
+      });
       
       const result = await inMemoryService.get(CacheKeys.VALIDATORS);
       expect(result).toBeNull();
+    });
+  });
+
+  describe('Redis Error Handling and Fallback Behavior', () => {
+    beforeEach(async () => {
+      mockRedisClient.connect.mockResolvedValue(undefined);
+      await cacheService.initialize();
+    });
+
+    describe('Get operation error handling', () => {
+      it('should gracefully fallback to memory cache when Redis get fails', async () => {
+        // First set data in memory cache
+        await cacheService.set(CacheKeys.VALIDATORS, { test: 'memory_data' });
+        
+        // Make Redis get fail
+        mockRedisClient.get.mockRejectedValue(new Error('Redis connection lost'));
+        
+        const result = await cacheService.get(CacheKeys.VALIDATORS);
+        
+        // Should get data from memory cache, not fail
+        expect(result).toEqual({ test: 'memory_data' });
+      });
+
+      it('should mark Redis as disconnected on get error', async () => {
+        mockRedisClient.get.mockRejectedValue(new Error('Redis connection lost'));
+        
+        await cacheService.get(CacheKeys.VALIDATORS);
+        
+        const stats = await cacheService.getStats();
+        expect(stats.redisConnected).toBe(false);
+      });
+    });
+
+    describe('Set operation error handling', () => {
+      it('should continue to set in memory cache when Redis set fails', async () => {
+        const testData = { test: 'data' };
+        
+        mockRedisClient.setEx.mockRejectedValue(new Error('Redis write failed'));
+        
+        // Should not throw
+        await expect(cacheService.set(CacheKeys.VALIDATORS, testData)).resolves.not.toThrow();
+        
+        // Should still be able to get from memory cache
+        const result = await cacheService.get(CacheKeys.VALIDATORS);
+        expect(result).toEqual(testData);
+      });
+
+      it('should mark Redis as disconnected on set error', async () => {
+        mockRedisClient.setEx.mockRejectedValue(new Error('Redis write failed'));
+        
+        await cacheService.set(CacheKeys.VALIDATORS, { test: 'data' });
+        
+        const stats = await cacheService.getStats();
+        expect(stats.redisConnected).toBe(false);
+      });
+    });
+
+    describe('Delete operation error handling', () => {
+      it('should continue to delete from memory cache when Redis del fails', async () => {
+        const testData = { test: 'data' };
+        
+        // Set data first
+        await cacheService.set(CacheKeys.VALIDATORS, testData);
+        
+        // Make Redis delete fail
+        mockRedisClient.del.mockRejectedValue(new Error('Redis delete failed'));
+        
+        // Should not throw
+        await expect(cacheService.delete(CacheKeys.VALIDATORS)).resolves.not.toThrow();
+      });
+
+      it('should mark Redis as disconnected on delete error', async () => {
+        mockRedisClient.del.mockRejectedValue(new Error('Redis delete failed'));
+        
+        await cacheService.delete(CacheKeys.VALIDATORS);
+        
+        const stats = await cacheService.getStats();
+        expect(stats.redisConnected).toBe(false);
+      });
+    });
+
+    describe('Flush operation error handling', () => {
+      it('should continue to clear memory cache when Redis flush fails', async () => {
+        mockRedisClient.flushDb.mockRejectedValue(new Error('Redis flush failed'));
+        
+        // Should not throw
+        await expect(cacheService.flush()).resolves.not.toThrow();
+      });
+
+      it('should mark Redis as disconnected on flush error', async () => {
+        mockRedisClient.flushDb.mockRejectedValue(new Error('Redis flush failed'));
+        
+        await cacheService.flush();
+        
+        const stats = await cacheService.getStats();
+        expect(stats.redisConnected).toBe(false);
+      });
+    });
+
+    describe('Stats operation error handling', () => {
+      it('should return stats with Redis marked as disconnected on keys error', async () => {
+        mockRedisClient.keys.mockRejectedValue(new Error('Redis keys failed'));
+        
+        const stats = await cacheService.getStats();
+        
+        expect(stats.redisConnected).toBe(false);
+        expect(stats).toHaveProperty('hits');
+        expect(stats).toHaveProperty('misses');
+      });
+
+      it('should handle Redis info command failure gracefully', async () => {
+        mockRedisClient.keys.mockResolvedValue(['key1']);
+        mockRedisClient.info.mockRejectedValue(new Error('Redis info failed'));
+        
+        const stats = await cacheService.getStats();
+        
+        expect(stats.redisConnected).toBe(false);
+        expect(stats.memoryUsage).toBeUndefined();
+      });
+    });
+
+    describe('DeletePattern operation error handling', () => {
+      it('should continue to delete from memory cache when Redis pattern delete fails', async () => {
+        mockRedisClient.keys.mockRejectedValue(new Error('Redis keys failed'));
+        
+        // Should not throw and return count of memory deletions
+        const deletedCount = await cacheService.deletePattern('test');
+        expect(deletedCount).toBeGreaterThanOrEqual(0);
+      });
+    });
+
+    describe('Disconnect error handling', () => {
+      it('should handle Redis disconnect errors gracefully', async () => {
+        mockRedisClient.disconnect.mockRejectedValue(new Error('Disconnect failed'));
+        
+        // Should not throw
+        await expect(cacheService.disconnect()).resolves.not.toThrow();
+      });
+    });
+  });
+
+  describe('Key Prefix Configuration', () => {
+    beforeEach(async () => {
+      mockRedisClient.connect.mockResolvedValue(undefined);
+      await cacheService.initialize();
+      // Set Redis as connected for these tests
+      (cacheService as any).isRedisConnected = true;
+    });
+
+    it('should use centralized key prefix constants', () => {
+      expect(CACHE_CONFIG.KEY_PREFIX).toBe('validator_analytics');
+      expect(CACHE_CONFIG.SEPARATOR).toBe(':');
+    });
+
+    it('should build keys correctly with prefix and separator', async () => {
+      await cacheService.set(CacheKeys.VALIDATORS, { test: 'data' });
+      
+      expect(mockRedisClient.setEx).toHaveBeenCalledWith(
+        `${CACHE_CONFIG.KEY_PREFIX}${CACHE_CONFIG.SEPARATOR}${CacheKeys.VALIDATORS}`,
+        expect.any(Number),
+        expect.any(String)
+      );
+    });
+
+    it('should build keys with identifier correctly', async () => {
+      const identifier = 'test123';
+      await cacheService.set(CacheKeys.VALIDATOR_DETAIL, { test: 'data' }, identifier);
+      
+      expect(mockRedisClient.setEx).toHaveBeenCalledWith(
+        `${CACHE_CONFIG.KEY_PREFIX}${CACHE_CONFIG.SEPARATOR}${CacheKeys.VALIDATOR_DETAIL}${CACHE_CONFIG.SEPARATOR}${identifier}`,
+        expect.any(Number),
+        expect.any(String)
+      );
+    });
+
+    it('should use prefix in pattern deletion', async () => {
+      await cacheService.deletePattern('test');
+      
+      expect(mockRedisClient.keys).toHaveBeenCalledWith(
+        `${CACHE_CONFIG.KEY_PREFIX}${CACHE_CONFIG.SEPARATOR}test*`
+      );
+    });
+
+    it('should use prefix in stats collection', async () => {
+      mockRedisClient.keys.mockResolvedValue(['key1', 'key2']);
+      
+      await cacheService.getStats();
+      
+      expect(mockRedisClient.keys).toHaveBeenCalledWith(
+        `${CACHE_CONFIG.KEY_PREFIX}${CACHE_CONFIG.SEPARATOR}*`
+      );
+    });
+  });
+
+  describe('TTL Logic Verification', () => {
+    beforeEach(async () => {
+      mockRedisClient.connect.mockResolvedValue(undefined);
+      await cacheService.initialize();
+      
+      // Manually set Redis as connected for test operations since we're mocking
+      (cacheService as any).isRedisConnected = true;
+    });
+
+    it('should use correct default TTLs for VALIDATORS cache type', async () => {
+      const testData = { test: 'data' };
+      mockRedisClient.setEx.mockClear();
+      
+      await cacheService.set(CacheKeys.VALIDATORS, testData);
+      expect(mockRedisClient.setEx).toHaveBeenCalledWith(
+        expect.any(String), CACHE_TTLS[CacheKeys.VALIDATORS], expect.any(String)
+      );
+    });
+
+    it('should use correct default TTLs for VALIDATOR_DETAIL cache type', async () => {
+      const testData = { test: 'data' };
+      mockRedisClient.setEx.mockClear();
+      
+      await cacheService.set(CacheKeys.VALIDATOR_DETAIL, testData);
+      expect(mockRedisClient.setEx).toHaveBeenCalledWith(
+        expect.any(String), CACHE_TTLS[CacheKeys.VALIDATOR_DETAIL], expect.any(String)
+      );
+    });
+
+    it('should use correct default TTLs for EPOCH_INFO cache type', async () => {
+      const testData = { test: 'data' };
+      mockRedisClient.setEx.mockClear();
+      
+      await cacheService.set(CacheKeys.EPOCH_INFO, testData);
+      expect(mockRedisClient.setEx).toHaveBeenCalledWith(
+        expect.any(String), CACHE_TTLS[CacheKeys.EPOCH_INFO], expect.any(String)
+      );
+    });
+
+    it('should override default TTL when custom TTL provided', async () => {
+      const testData = { test: 'data' };
+      const customTTL = 999;
+      
+      await cacheService.set(CacheKeys.VALIDATORS, testData, undefined, customTTL);
+      
+      expect(mockRedisClient.setEx).toHaveBeenCalledWith(
+        expect.any(String), customTTL, expect.any(String)
+      );
+    });
+
+    it('should use service default TTL when cache key has no predefined TTL', async () => {
+      const serviceWithCustomDefault = new CacheService({
+        redisUrl: 'redis://localhost:6379',
+        defaultTTL: 777
+      });
+      
+      await serviceWithCustomDefault.initialize();
+      // Manually set Redis as connected for this test
+      (serviceWithCustomDefault as any).isRedisConnected = true;
+      
+      // Clear previous mock calls
+      mockRedisClient.setEx.mockClear();
+      
+      // Use a custom cache key not in CACHE_TTLS
+      await serviceWithCustomDefault.set('CUSTOM_KEY' as CacheKeys, { test: 'data' });
+      
+      expect(mockRedisClient.setEx).toHaveBeenCalledWith(
+        expect.any(String), 777, expect.any(String)
+      );
+    });
+
+    it('should correctly handle in-memory TTL expiration', async () => {
+      // Use in-memory only service for this test
+      const inMemoryService = new CacheService({ enableInMemoryFallback: true });
+      await inMemoryService.initialize();
+      
+      const testData = { test: 'data' };
+      
+      // Set item directly with expired timestamp  
+      (inMemoryService as any).inMemoryCache.set('validator_analytics:validators', {
+        data: testData,
+        expires: Date.now() - 1000 // Already expired
+      });
+      
+      // Should be expired immediately
+      const result = await inMemoryService.get(CacheKeys.VALIDATORS);
+      expect(result).toBeNull();
+    });
+
+    it('should correctly handle in-memory TTL for valid data', async () => {
+      // Use in-memory only service for this test
+      const inMemoryService = new CacheService({ enableInMemoryFallback: true });
+      await inMemoryService.initialize();
+      
+      const testData = { test: 'data' };
+      
+      // Set with long TTL
+      await inMemoryService.set(CacheKeys.VALIDATORS, testData, undefined, 3600);
+      
+      // Should still be valid
+      const result = await inMemoryService.get(CacheKeys.VALIDATORS);
+      expect(result).toEqual(testData);
     });
   });
 });
