@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Phase Validator Analytics API</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Audiowide&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary-text: #F3EED9;
+            --bg-main: #0F0E0C;
+            --bg-secondary: rgba(243, 238, 217, 0.05);
+            --accent: #F3EED9;
+            --title-font: 'Audiowide', cursive;
+            --body-font: 'Outfit', sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-main);
+            color: var(--primary-text);
+            font-family: var(--body-font);
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+
+        /* Hero Section */
+        .hero {
+            padding: 120px 0;
+            text-align: center;
+            background: linear-gradient(135deg, var(--bg-main) 0%, var(--bg-secondary) 100%);
+        }
+
+        .hero h1 {
+            font-family: var(--title-font);
+            font-size: 3.5rem;
+            margin-bottom: 1.5rem;
+            background: linear-gradient(135deg, var(--accent) 0%, #D4C5A0 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .hero p {
+            font-size: 1.4rem;
+            margin-bottom: 3rem;
+            opacity: 0.9;
+            font-weight: 300;
+        }
+
+        .cta-button {
+            display: inline-block;
+            padding: 16px 32px;
+            background: transparent;
+            border: 2px solid var(--accent);
+            color: var(--accent);
+            text-decoration: none;
+            font-family: var(--body-font);
+            font-weight: 600;
+            font-size: 1.1rem;
+            transition: all 0.3s ease;
+            border-radius: 8px;
+        }
+
+        .cta-button:hover {
+            background: var(--accent);
+            color: var(--bg-main);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(243, 238, 217, 0.2);
+        }
+
+        /* Section Styles */
+        section {
+            padding: 80px 0;
+        }
+
+        section:nth-child(even) {
+            background-color: var(--bg-secondary);
+        }
+
+        .section-title {
+            font-family: var(--title-font);
+            font-size: 2.5rem;
+            text-align: center;
+            margin-bottom: 3rem;
+            color: var(--accent);
+        }
+
+        /* Why On-Chain */
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+            margin-top: 2rem;
+        }
+
+        .feature-card {
+            background: var(--bg-secondary);
+            padding: 2rem;
+            border-radius: 12px;
+            border: 1px solid rgba(243, 238, 217, 0.1);
+            text-align: center;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .feature-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(243, 238, 217, 0.1);
+        }
+
+        .feature-card h3 {
+            font-size: 1.3rem;
+            margin-bottom: 1rem;
+            color: var(--accent);
+            font-weight: 600;
+        }
+
+        .feature-card p {
+            opacity: 0.8;
+            font-weight: 300;
+        }
+
+        /* Endpoints */
+        .endpoints-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 1.5rem;
+            margin-top: 2rem;
+        }
+
+        .endpoint-card {
+            background: var(--bg-secondary);
+            padding: 1.5rem;
+            border-radius: 8px;
+            border-left: 4px solid var(--accent);
+            font-family: 'Courier New', monospace;
+        }
+
+        .endpoint-method {
+            color: #4CAF50;
+            font-weight: bold;
+            margin-right: 1rem;
+        }
+
+        .endpoint-path {
+            color: var(--accent);
+        }
+
+        .endpoint-desc {
+            font-family: var(--body-font);
+            font-size: 0.9rem;
+            opacity: 0.7;
+            margin-top: 0.5rem;
+        }
+
+        /* Features Grid (6 items) */
+        .features-6-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1.5rem;
+            margin-top: 2rem;
+        }
+
+        .feature-6-card {
+            background: var(--bg-secondary);
+            padding: 1.5rem;
+            border-radius: 8px;
+            border: 1px solid rgba(243, 238, 217, 0.1);
+            text-align: center;
+            transition: transform 0.3s ease;
+        }
+
+        .feature-6-card:hover {
+            transform: translateY(-3px);
+        }
+
+        .feature-6-card h4 {
+            color: var(--accent);
+            margin-bottom: 0.5rem;
+            font-weight: 600;
+        }
+
+        .feature-6-card p {
+            font-size: 0.9rem;
+            opacity: 0.7;
+        }
+
+        /* Quickstart */
+        .quickstart {
+            background-color: var(--bg-secondary);
+        }
+
+        .code-block {
+            background: #1a1a1a;
+            padding: 2rem;
+            border-radius: 8px;
+            border: 1px solid rgba(243, 238, 217, 0.1);
+            margin-top: 2rem;
+            font-family: 'Courier New', monospace;
+            color: #4CAF50;
+            font-size: 0.9rem;
+            overflow-x: auto;
+        }
+
+        /* Use Cases */
+        .use-cases-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 2rem;
+            margin-top: 2rem;
+        }
+
+        .use-case-card {
+            background: var(--bg-secondary);
+            padding: 2rem;
+            border-radius: 12px;
+            border: 1px solid rgba(243, 238, 217, 0.1);
+            transition: transform 0.3s ease;
+        }
+
+        .use-case-card:hover {
+            transform: translateY(-5px);
+        }
+
+        .use-case-card h4 {
+            color: var(--accent);
+            margin-bottom: 1rem;
+            font-weight: 600;
+            font-size: 1.2rem;
+        }
+
+        .use-case-card p {
+            opacity: 0.8;
+            font-weight: 300;
+        }
+
+        /* Footer */
+        footer {
+            padding: 60px 0;
+            text-align: center;
+            border-top: 1px solid rgba(243, 238, 217, 0.1);
+        }
+
+        .footer-content {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 2rem;
+            margin-bottom: 2rem;
+        }
+
+        .footer-logo {
+            font-family: var(--title-font);
+            font-size: 1.5rem;
+            color: var(--accent);
+        }
+
+        .footer-links {
+            display: flex;
+            gap: 2rem;
+        }
+
+        .footer-links a {
+            color: var(--primary-text);
+            text-decoration: none;
+            opacity: 0.8;
+            transition: opacity 0.3s ease;
+        }
+
+        .footer-links a:hover {
+            opacity: 1;
+            color: var(--accent);
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .hero h1 {
+                font-size: 2.5rem;
+            }
+
+            .hero p {
+                font-size: 1.2rem;
+            }
+
+            .section-title {
+                font-size: 2rem;
+            }
+
+            .container {
+                padding: 0 15px;
+            }
+
+            .footer-content {
+                flex-direction: column;
+                gap: 1rem;
+            }
+
+            .footer-links {
+                flex-direction: column;
+                gap: 1rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="container">
+            <h1>Phase Validator Analytics API</h1>
+            <p>Real-time Solana validator intelligence, direct from on-chain data</p>
+            <a href="/docs" class="cta-button">View Documentation</a>
+        </div>
+    </section>
+
+    <!-- Why On-Chain Section -->
+    <section>
+        <div class="container">
+            <h2 class="section-title">Why On-Chain</h2>
+            <div class="features-grid">
+                <div class="feature-card">
+                    <h3>No Third-Party Dependencies</h3>
+                    <p>Pure RPC calls directly to Solana nodes. No reliance on external data providers or aggregators that could introduce latency or failures.</p>
+                </div>
+                <div class="feature-card">
+                    <h3>Real-Time Accuracy</h3>
+                    <p>Live data straight from the blockchain, not cached aggregator data. Get the most up-to-date validator performance metrics as they happen.</p>
+                </div>
+                <div class="feature-card">
+                    <h3>Full Transparency</h3>
+                    <p>Verify every data point yourself. All metrics are derived from verifiable on-chain sources, giving you complete confidence in the data integrity.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Endpoints Section -->
+    <section>
+        <div class="container">
+            <h2 class="section-title">API Endpoints</h2>
+            <div class="endpoints-grid">
+                <div class="endpoint-card">
+                    <div><span class="endpoint-method">GET</span><span class="endpoint-path">/api/validators</span></div>
+                    <div class="endpoint-desc">Get full list of Solana validators with performance metrics</div>
+                </div>
+                <div class="endpoint-card">
+                    <div><span class="endpoint-method">GET</span><span class="endpoint-path">/api/validators/:voteAccount</span></div>
+                    <div class="endpoint-desc">Detailed information for a specific validator</div>
+                </div>
+                <div class="endpoint-card">
+                    <div><span class="endpoint-method">GET</span><span class="endpoint-path">/api/validators/:voteAccount/history</span></div>
+                    <div class="endpoint-desc">Historical performance data for a validator</div>
+                </div>
+                <div class="endpoint-card">
+                    <div><span class="endpoint-method">GET</span><span class="endpoint-path">/api/epoch/current</span></div>
+                    <div class="endpoint-desc">Current epoch information and statistics</div>
+                </div>
+                <div class="endpoint-card">
+                    <div><span class="endpoint-method">GET</span><span class="endpoint-path">/api/stake-accounts/:wallet</span></div>
+                    <div class="endpoint-desc">Stake account details for a specific wallet</div>
+                </div>
+                <div class="endpoint-card">
+                    <div><span class="endpoint-method">GET</span><span class="endpoint-path">/api/network/stats</span></div>
+                    <div class="endpoint-desc">Network statistics including Nakamoto coefficient</div>
+                </div>
+                <div class="endpoint-card">
+                    <div><span class="endpoint-method">GET</span><span class="endpoint-path">/api/validators/compare</span></div>
+                    <div class="endpoint-desc">Compare multiple validators side by side</div>
+                </div>
+                <div class="endpoint-card">
+                    <div><span class="endpoint-method">GET</span><span class="endpoint-path">/api/validators/top</span></div>
+                    <div class="endpoint-desc">Validator leaderboard by various metrics</div>
+                </div>
+                <div class="endpoint-card">
+                    <div><span class="endpoint-method">GET</span><span class="endpoint-path">/api/alerts/delinquent</span></div>
+                    <div class="endpoint-desc">Alert system for delinquent validators</div>
+                </div>
+                <div class="endpoint-card">
+                    <div><span class="endpoint-method">WebSocket</span><span class="endpoint-path">/ws</span></div>
+                    <div class="endpoint-desc">Real-time updates via WebSocket connection</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Features Section -->
+    <section>
+        <div class="container">
+            <h2 class="section-title">Features</h2>
+            <div class="features-6-grid">
+                <div class="feature-6-card">
+                    <h4>Pure On-Chain Data</h4>
+                    <p>Direct RPC calls to Solana nodes</p>
+                </div>
+                <div class="feature-6-card">
+                    <h4>Redis Caching</h4>
+                    <p>Fast response times with intelligent caching</p>
+                </div>
+                <div class="feature-6-card">
+                    <h4>WebSocket Real-Time</h4>
+                    <p>Live updates via WebSocket connections</p>
+                </div>
+                <div class="feature-6-card">
+                    <h4>Network Aggregation</h4>
+                    <p>Comprehensive network-wide statistics</p>
+                </div>
+                <div class="feature-6-card">
+                    <h4>Validator Comparison</h4>
+                    <p>Side-by-side validator analysis tools</p>
+                </div>
+                <div class="feature-6-card">
+                    <h4>Swagger UI Docs</h4>
+                    <p>Interactive API documentation</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Quickstart Section -->
+    <section class="quickstart">
+        <div class="container">
+            <h2 class="section-title">Quickstart</h2>
+            <p style="text-align: center; opacity: 0.8; margin-bottom: 1rem;">Get started with a simple cURL request:</p>
+            <div class="code-block">curl https://api.phase.com/api/validators?limit=10&sortBy=apy&order=desc</div>
+        </div>
+    </section>
+
+    <!-- Use Cases Section -->
+    <section>
+        <div class="container">
+            <h2 class="section-title">Use Cases</h2>
+            <div class="use-cases-grid">
+                <div class="use-case-card">
+                    <h4>AI Staking Agents</h4>
+                    <p>Autonomous agents that analyze validator performance to make optimal staking decisions based on real-time data.</p>
+                </div>
+                <div class="use-case-card">
+                    <h4>Portfolio Dashboards</h4>
+                    <p>Build comprehensive dashboards that track your staking portfolio across multiple validators with live performance metrics.</p>
+                </div>
+                <div class="use-case-card">
+                    <h4>Validator Monitoring Tools</h4>
+                    <p>Create monitoring applications that track validator health, performance, and alert on delinquency or performance issues.</p>
+                </div>
+                <div class="use-case-card">
+                    <h4>Staking Analytics Platforms</h4>
+                    <p>Power analytics platforms with comprehensive validator data, historical performance, and network-wide statistics.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer>
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-logo">Built by Phase</div>
+                <div class="footer-links">
+                    <a href="https://github.com/Devour6/validator-analytics-api">GitHub</a>
+                    <a href="/docs">Documentation</a>
+                </div>
+            </div>
+            <p style="opacity: 0.6; font-size: 0.9rem;">&copy; 2024 Phase. Real-time Solana validator intelligence.</p>
+        </div>
+    </footer>
+</body>
+</html>
