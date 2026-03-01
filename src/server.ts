@@ -9,9 +9,11 @@ import dotenv from 'dotenv';
 import rateLimit from 'express-rate-limit';
 import Joi from 'joi';
 import { createServer } from 'http';
+import swaggerUi from 'swagger-ui-express';
 import { ValidatorService } from './services/validatorService';
 import { WebSocketService } from './services/websocketService';
 import { ValidatorAnalyticsService } from './services/validatorAnalyticsService';
+import { specs } from './swagger';
 
 // Load environment variables
 dotenv.config();
@@ -108,6 +110,32 @@ const validateQuery = (schema: Joi.ObjectSchema) => {
     next();
   };
 };
+
+// OpenAPI/Swagger UI documentation
+app.use('/docs', swaggerUi.serve, swaggerUi.setup(specs, {
+  explorer: true,
+  customCss: '.swagger-ui .topbar { display: none }',
+  customSiteTitle: 'Validator Analytics API Documentation'
+}));
+
+// API root endpoint
+app.get('/', (req, res) => {
+  res.json({
+    success: true,
+    message: 'Validator Analytics API v1.0.0',
+    version: '1.0.0',
+    documentation: '/docs',
+    endpoints: [
+      '/validators',
+      '/validator/:voteAccount', 
+      '/performance/:voteAccount',
+      '/stake/:walletAddress',
+      '/health'
+    ],
+    description: 'Solana Validator Analytics API - On-chain data only',
+    timestamp: Date.now()
+  });
+});
 
 // Health check endpoint
 app.get('/health', async (req, res) => {
