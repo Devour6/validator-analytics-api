@@ -50,20 +50,26 @@ export class ValidatorService {
       console.log('Fetching vote accounts from RPC...');
       
       // Get current epoch with timeout
+      let epochTimeout: NodeJS.Timeout;
       const epochInfo = await Promise.race([
         this.connection.getEpochInfo(),
-        new Promise<never>((_, reject) => 
-          setTimeout(() => reject(new Error('Epoch info request timeout')), this.REQUEST_TIMEOUT)
-        )
-      ]);
+        new Promise<never>((_, reject) => {
+          epochTimeout = setTimeout(() => reject(new Error('Epoch info request timeout')), this.REQUEST_TIMEOUT);
+        })
+      ]).finally(() => {
+        if (epochTimeout) clearTimeout(epochTimeout);
+      });
       
       // Fetch all vote accounts with timeout
+      let voteTimeout: NodeJS.Timeout;
       const voteAccounts: VoteAccountStatus = await Promise.race([
         this.connection.getVoteAccounts(),
-        new Promise<never>((_, reject) => 
-          setTimeout(() => reject(new Error('Vote accounts request timeout')), this.REQUEST_TIMEOUT)
-        )
-      ]);
+        new Promise<never>((_, reject) => {
+          voteTimeout = setTimeout(() => reject(new Error('Vote accounts request timeout')), this.REQUEST_TIMEOUT);
+        })
+      ]).finally(() => {
+        if (voteTimeout) clearTimeout(voteTimeout);
+      });
       
       // Guard against null/undefined voteAccounts and missing properties
       if (!voteAccounts) {
@@ -293,19 +299,25 @@ export class ValidatorService {
     
     try {
       // Test RPC connection with timeout
+      let slotTimeout: NodeJS.Timeout;
+      let healthEpochTimeout: NodeJS.Timeout;
       const [slot, epochInfo] = await Promise.all([
         Promise.race([
           this.connection.getSlot(),
-          new Promise<never>((_, reject) => 
-            setTimeout(() => reject(new Error('Slot request timeout')), 10000)
-          )
-        ]),
+          new Promise<never>((_, reject) => {
+            slotTimeout = setTimeout(() => reject(new Error('Slot request timeout')), 10000);
+          })
+        ]).finally(() => {
+          if (slotTimeout) clearTimeout(slotTimeout);
+        }),
         Promise.race([
           this.connection.getEpochInfo(),
-          new Promise<never>((_, reject) => 
-            setTimeout(() => reject(new Error('Epoch info request timeout')), 10000)
-          )
-        ])
+          new Promise<never>((_, reject) => {
+            healthEpochTimeout = setTimeout(() => reject(new Error('Epoch info request timeout')), 10000);
+          })
+        ]).finally(() => {
+          if (healthEpochTimeout) clearTimeout(healthEpochTimeout);
+        })
       ]);
       
       const responseTime = Date.now() - startTime;
