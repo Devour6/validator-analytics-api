@@ -1,8 +1,8 @@
 # Multi-stage Dockerfile for Validator Analytics API
 # Optimized for production deployment with security and performance
 
-# Base stage with common dependencies
-FROM node:18-alpine AS base
+# Base stage with common dependencies - pinned digest for security
+FROM node:18-alpine@sha256:43eb8501752b21ca4e5b3e4d87c368fce455e90dba8cf0b70c5e90dab97c8b8e AS base
 
 WORKDIR /app
 
