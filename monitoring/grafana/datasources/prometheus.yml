@@ -1,0 +1,26 @@
+# Grafana Data Sources Configuration for Validator Analytics API
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      timeInterval: "15s"
+      queryTimeout: "60s"
+      httpMethod: GET
+      customQueryParameters: ""
+      manageAlerts: true
+      alertmanagerUid: ""
+    secureJsonData: {}
+
+  - name: Prometheus-Alerts
+    type: alertmanager
+    access: proxy
+    url: http://alertmanager:9093
+    editable: false
+    jsonData:
+      implementation: prometheus

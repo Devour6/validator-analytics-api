@@ -1,0 +1,168 @@
+# Multi-stage Dockerfile for Validator Analytics API
+# Optimized for production deployment with security and performance
+
+# Base stage with common dependencies
+FROM node:18-alpine AS base
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apk add --no-cache \
+    curl \
+    bash \
+    git \
+    python3 \
+    make \
+    g++ \
+    dumb-init
+
+# Copy package files
+COPY package*.json ./
+COPY tsconfig.json ./
+
+# Install dependencies
+RUN npm ci --only=production --ignore-scripts && \
+    npm cache clean --force
+
+# Development stage with all dependencies
+FROM base AS development
+
+# Install all dependencies including dev dependencies
+RUN npm ci
+
+# Copy source code
+COPY . .
+
+# Build TypeScript
+RUN npm run build && \
+    npm run type-check
+
+# Test stage for running tests and validation
+FROM development AS test
+
+# Install additional test dependencies
+RUN apk add --no-cache jq
+
+# Create test results directory
+RUN mkdir -p /app/test-results
+
+# Copy test configurations
+COPY jest.config.js ./
+
+# Add comprehensive test runner script
+RUN echo '#!/bin/bash\n\
+set -e\n\
+\n\
+echo "🧪 Starting Validator Analytics API Test Suite"\n\
+echo "NODE_ENV: $NODE_ENV"\n\
+echo "SOLANA_RPC_URL: $SOLANA_RPC_URL"\n\
+\n\
+# Health check function\n\
+health_check() {\n\
+    local url=$1\n\
+    local timeout=${2:-30}\n\
+    echo "⏳ Waiting for service at $url (timeout: ${timeout}s)"\n\
+    timeout $timeout bash -c "until curl -sf $url; do sleep 2; done"\n\
+    echo "✅ Service at $url is ready"\n\
+}\n\
+\n\
+# Run linting\n\
+echo "🔍 Running linting..."\n\
+npm run lint 2>&1 | tee /app/test-results/lint.log\n\
+\n\
+# Run type checking\n\
+echo "🔧 Running type checking..."\n\
+npm run type-check 2>&1 | tee /app/test-results/type-check.log\n\
+\n\
+# Run unit tests\n\
+echo "🧪 Running unit tests..."\n\
+npm test 2>&1 | tee /app/test-results/unit-tests.log\n\
+\n\
+# Test production build\n\
+echo "🏗️  Testing production build..."\n\
+npm run build\n\
+\n\
+# Start API for integration testing\n\
+if [[ "$RUN_INTEGRATION_TESTS" == "true" ]]; then\n\
+    echo "🚀 Starting API for integration tests..."\n\
+    NODE_ENV=test npm start &\n\
+    API_PID=$!\n\
+    \n\
+    # Wait for API to be ready\n\
+    health_check "http://localhost:3001/health" 60\n\
+    \n\
+    # Run basic integration tests\n\
+    echo "🔄 Running integration tests..."\n\
+    curl -sf "http://localhost:3001/api/v1/validators" > /dev/null\n\
+    curl -sf "http://localhost:3001/metrics" > /dev/null\n\
+    \n\
+    # Stop the API\n\
+    kill $API_PID || true\n\
+    wait $API_PID 2>/dev/null || true\n\
+    \n\
+    echo "✅ Integration tests passed"\n\
+else\n\
+    echo "⏭️  Skipping integration tests (RUN_INTEGRATION_TESTS != true)"\n\
+fi\n\
+\n\
+echo "✅ Test suite completed successfully"\n\
+' > /app/run-tests.sh && chmod +x /app/run-tests.sh
+
+# Health check for test container
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:3001/health || exit 1
+
+# Default command for test stage
+CMD ["/app/run-tests.sh"]
+
+# Production stage - minimal and secure image
+FROM base AS production
+
+# Copy built application from development stage
+COPY --from=development /app/dist ./dist
+COPY --from=development /app/package*.json ./
+
+# Copy necessary runtime files
+COPY .env.example ./
+
+# Create logs directory with proper permissions
+RUN mkdir -p logs && \
+    chmod 755 logs
+
+# Create non-root user for security
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S nodejs -u 1001 -G nodejs
+
+# Change ownership of app directory
+RUN chown -R nodejs:nodejs /app
+
+# Switch to non-root user
+USER nodejs
+
+# Expose ports
+EXPOSE 3001 9090
+
+# Add comprehensive health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:3001/health && \
+        curl -f http://localhost:3001/api/v1/status || exit 1
+
+# Add signal handling and graceful shutdown
+STOPSIGNAL SIGTERM
+
+# Production startup with dumb-init for proper signal handling
+ENTRYPOINT ["dumb-init", "--"]
+CMD ["node", "dist/server.js"]
+
+# Metadata
+LABEL name="validator-analytics-api" \
+      version="1.0.0" \
+      description="Solana Validator Analytics API - Production Mainnet" \
+      maintainer="Ross - Phase Labs" \
+      network="mainnet" \
+      build-date="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      vcs-url="https://github.com/Devour6/validator-analytics-api" \
+      org.opencontainers.image.source="https://github.com/Devour6/validator-analytics-api" \
+      org.opencontainers.image.vendor="Phase Labs" \
+      org.opencontainers.image.title="Validator Analytics API" \
+      org.opencontainers.image.description="Production-ready Solana validator analytics API"

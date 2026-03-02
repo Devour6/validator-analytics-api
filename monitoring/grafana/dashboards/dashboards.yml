@@ -1,0 +1,33 @@
+# Grafana Dashboards Provisioning for Validator Analytics API
+apiVersion: 1
+
+providers:
+  - name: 'default'
+    orgId: 1
+    folder: ''
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 10
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
+
+  - name: 'validator-analytics'
+    orgId: 1
+    folder: 'Validator Analytics'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards/validator-analytics
+
+  - name: 'system-monitoring'
+    orgId: 1
+    folder: 'System Monitoring'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards/system

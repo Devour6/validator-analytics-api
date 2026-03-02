@@ -1,0 +1,129 @@
+# Prometheus Configuration for Validator Analytics API - Mainnet
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    environment: 'mainnet'
+    service: 'validator-analytics-api'
+    cluster: 'solana-mainnet'
+
+rule_files:
+  - "alert-rules.yml"
+
+# Alert Manager Configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          # - "alertmanager:9093"  # Uncomment when alertmanager is deployed
+
+scrape_configs:
+  # Validator Analytics API - Main Application Metrics
+  - job_name: 'validator-analytics-api'
+    static_configs:
+      - targets: ['validator-analytics-api:3001']
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+    scrape_timeout: 8s
+    honor_labels: true
+    params:
+      format: ['prometheus']
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'validator-analytics-api'
+
+  # Node.js Application Metrics (detailed runtime metrics)
+  - job_name: 'nodejs-runtime-metrics'
+    static_configs:
+      - targets: ['validator-analytics-api:9090']
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+    scrape_timeout: 10s
+
+  # Redis Metrics via Redis Exporter
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis-exporter:9121']
+    scrape_interval: 30s
+    scrape_timeout: 10s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'redis-mainnet'
+
+  # System Metrics via Node Exporter
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+    scrape_interval: 15s
+    scrape_timeout: 10s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'validator-analytics-host'
+
+  # Prometheus Self-Monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+    scrape_interval: 30s
+    scrape_timeout: 10s
+
+  # Container Health and Status Monitoring
+  - job_name: 'health-checks'
+    static_configs:
+      - targets: ['validator-analytics-api:3001']
+    metrics_path: '/health'
+    scrape_interval: 30s
+    scrape_timeout: 5s
+    honor_labels: true
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'up'
+        target_label: 'health_status'
+        replacement: 'healthy'
+
+  # Nginx Metrics (if nginx-prometheus-exporter is added)
+  - job_name: 'nginx'
+    static_configs:
+      - targets: ['nginx:9113']
+    scrape_interval: 30s
+    scrape_timeout: 10s
+    honor_labels: true
+
+  # Solana RPC Endpoint Monitoring (external)
+  - job_name: 'solana-rpc-monitoring'
+    static_configs:
+      - targets: ['api.mainnet-beta.solana.com:443']
+    metrics_path: '/health'
+    scheme: https
+    scrape_interval: 60s
+    scrape_timeout: 30s
+    honor_labels: true
+
+# Remote write configuration (for external monitoring systems)
+# remote_write:
+#   - url: "https://monitoring.phase.com/api/v1/write"
+#     headers:
+#       Authorization: "Bearer ${REMOTE_WRITE_TOKEN}"
+
+# Storage Configuration - Production Optimized
+storage:
+  tsdb:
+    retention.time: 30d
+    retention.size: 10GB
+    wal-compression: true
+
+# Web Configuration
+web:
+  enable_lifecycle: true
+  enable_admin_api: true
+  max_connections: 512
+  read_timeout: 30s
+  
+# Query Configuration
+query:
+  max_concurrency: 20
+  timeout: 2m
+  max_samples: 50000000
