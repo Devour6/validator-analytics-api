@@ -121,3 +121,17 @@ Thumbs.db
 
 # Built application
 dist/
+
+# SSL Certificates and Private Keys - SECURITY RISK if committed
+*.pem
+*.crt
+*.key
+*.p12
+*.pfx
+*.cer
+*.der
+ssl/
+certs/
+certificates/
+nginx/ssl/
+monitoring/ssl/
