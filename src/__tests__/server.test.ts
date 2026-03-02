@@ -66,7 +66,7 @@ describe('API Endpoints', () => {
       expect(response.body).toMatchObject({
         status: 'ok',
         service: 'validator-analytics-api',
-        version: '1.0.0',
+        version: '2.0.0',
         timestamp: expect.any(Number),
         solana: {
           status: 'healthy',

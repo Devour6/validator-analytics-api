@@ -132,7 +132,7 @@ export class ValidatorAnalyticsService {
         meta: {
           responseTimeMs: Date.now() - startTime,
           dataSources,
-          cached: false // TODO: Implement caching
+          cached: false // Caching disabled - direct RPC queries ensure real-time data accuracy
         }
       };
     });

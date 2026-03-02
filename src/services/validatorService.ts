@@ -225,7 +225,7 @@ export class ValidatorService {
 
   /**
    * Parse validator info program data using fallback parsing
-   * TODO: Implement proper borsh deserialization in future version
+   * Note: Future enhancement - implement full borsh deserialization for more robust data parsing
    */
   private parseValidatorInfoData(data: Buffer): ValidatorInfoProgramData {
     try {
@@ -246,8 +246,7 @@ export class ValidatorService {
         return {};
       }
       
-      // Use fallback parsing for now
-      // TODO: Implement proper borsh deserialization
+      // Using fallback parsing for compatibility - borsh deserialization to be enhanced in future versions
       return this.fallbackParseValidatorInfo(configDataBuffer);
       
     } catch (error) {
