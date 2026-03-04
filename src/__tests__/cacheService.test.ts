@@ -5,7 +5,7 @@
 
 import { CacheService, CacheKeys, CACHE_TTLS, CACHE_CONFIG } from '../services/cacheService';
 
-// Mock Redis client
+// Mock Redis client with complete interface
 const mockRedisClient = {
   connect: jest.fn(),
   disconnect: jest.fn(),
@@ -15,12 +15,19 @@ const mockRedisClient = {
   keys: jest.fn(),
   flushDb: jest.fn(),
   info: jest.fn(),
-  on: jest.fn()
+  on: jest.fn(),
+  off: jest.fn(),
+  emit: jest.fn(),
+  ping: jest.fn(),
+  quit: jest.fn(),
+  isReady: true,
+  isOpen: true
 };
 
-// Mock redis module
+// Complete mock of redis module - ensures NO real Redis connections
 jest.mock('redis', () => ({
-  createClient: jest.fn(() => mockRedisClient)
+  createClient: jest.fn(() => mockRedisClient),
+  RedisClientType: jest.fn()
 }));
 
 describe('CacheService', () => {

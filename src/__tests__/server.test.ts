@@ -66,7 +66,7 @@ describe('API Endpoints', () => {
       expect(response.body).toMatchObject({
         status: 'ok',
         service: 'validator-analytics-api',
-        version: '1.0.0',
+        version: '2.0.0',
         timestamp: expect.any(Number),
         solana: {
           status: 'healthy',
@@ -328,6 +328,96 @@ describe('API Endpoints', () => {
       // Verify swagger UI is properly initialized
       expect(response.text).toContain('swagger-ui-bundle');
       expect(response.text).toContain('swagger-ui');
+    });
+  });
+
+  describe('Response Time Middleware', () => {
+    beforeEach(() => {
+      mockGetValidators.mockResolvedValue({
+        validators: [],
+        epoch: 250,
+        totalValidators: 0,
+        totalStake: 0,
+        timestamp: Date.now(),
+      });
+    });
+
+    it('should add responseTimeMs to meta in successful responses', async () => {
+      const response = await request(app).get('/api/validators');
+
+      expect(response.status).toBe(200);
+      expect(response.body.meta).toBeDefined();
+      expect(response.body.meta.responseTimeMs).toBeDefined();
+      expect(typeof response.body.meta.responseTimeMs).toBe('number');
+      expect(response.body.meta.responseTimeMs).toBeGreaterThan(0);
+      expect(Number.isInteger(response.body.meta.responseTimeMs)).toBe(true);
+      expect(Number.isNaN(response.body.meta.responseTimeMs)).toBe(false);
+    });
+
+    it('should add responseTimeMs to meta in health check responses', async () => {
+      mockHealthCheck.mockResolvedValue({
+        status: 'healthy',
+        blockHeight: 12345,
+        epoch: 250,
+        responseTimeMs: 100,
+      });
+
+      const response = await request(app).get('/health');
+
+      expect(response.status).toBe(200);
+      expect(response.body.meta).toBeDefined();
+      expect(response.body.meta.responseTimeMs).toBeDefined();
+      expect(typeof response.body.meta.responseTimeMs).toBe('number');
+      expect(response.body.meta.responseTimeMs).toBeGreaterThan(0);
+      expect(Number.isNaN(response.body.meta.responseTimeMs)).toBe(false);
+    });
+
+    it('should add responseTimeMs to meta in root endpoint responses', async () => {
+      const response = await request(app).get('/');
+
+      expect(response.status).toBe(200);
+      expect(response.body.meta).toBeDefined();
+      expect(response.body.meta.responseTimeMs).toBeDefined();
+      expect(typeof response.body.meta.responseTimeMs).toBe('number');
+      expect(response.body.meta.responseTimeMs).toBeGreaterThan(0);
+      expect(Number.isNaN(response.body.meta.responseTimeMs)).toBe(false);
+    });
+
+    it('should ensure responseTimeMs is a positive number and not NaN', async () => {
+      // Test multiple endpoints to ensure consistent behavior
+      const endpoints = ['/'];
+      
+      for (const endpoint of endpoints) {
+        const response = await request(app).get(endpoint);
+        
+        expect(response.status).toBe(200);
+        const responseTimeMs = response.body.meta?.responseTimeMs;
+        
+        // Verify it's a positive number
+        expect(responseTimeMs).toBeDefined();
+        expect(typeof responseTimeMs).toBe('number');
+        expect(responseTimeMs).toBeGreaterThan(0);
+        expect(Number.isFinite(responseTimeMs)).toBe(true);
+        expect(Number.isNaN(responseTimeMs)).toBe(false);
+        
+        // Verify it's a reasonable range (should be under 1000ms for tests)
+        expect(responseTimeMs).toBeLessThan(1000);
+      }
+    });
+
+    it('should calculate response time correctly using numeric timestamps', async () => {
+      const response = await request(app).get('/');
+      
+      // The response time should be calculated correctly
+      const responseTimeMs = response.body.meta.responseTimeMs;
+      
+      // Should be a valid positive integer
+      expect(Number.isInteger(responseTimeMs)).toBe(true);
+      expect(responseTimeMs).toBeGreaterThanOrEqual(1); // Minimum 1ms as per middleware
+      
+      // Should not be NaN (which would happen with Date.now() - new Date())
+      expect(Number.isNaN(responseTimeMs)).toBe(false);
+      expect(Number.isFinite(responseTimeMs)).toBe(true);
     });
   });
 

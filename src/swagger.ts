@@ -9,7 +9,7 @@ const options = {
     openapi: '3.0.0',
     info: {
       title: 'Validator Analytics API',
-      version: '1.0.0',
+      version: '2.0.0',
       description: 'Solana Validator Analytics API - On-chain data only',
       termsOfService: 'https://phaselabs.io/terms',
       contact: {

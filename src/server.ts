@@ -73,6 +73,33 @@ app.use((req, res, next) => {
   next();
 });
 
+// Response time middleware
+app.use((req, res, next) => {
+  const startTime = process.hrtime.bigint();
+  
+  // Capture the original res.json method
+  const originalJson = res.json.bind(res);
+  
+  // Override res.json to add responseTimeMs to meta
+  res.json = function(data: any) {
+    const endTime = process.hrtime.bigint();
+    const responseTimeNs = endTime - startTime;
+    const responseTime = Math.max(1, Math.round(Number(responseTimeNs) / 1000000)); // Convert to ms, minimum 1ms
+    
+    // Add responseTimeMs to meta if the response is an object
+    if (typeof data === 'object' && data !== null && !Array.isArray(data)) {
+      if (!data.meta) {
+        data.meta = {};
+      }
+      data.meta.responseTimeMs = responseTime;
+    }
+    
+    return originalJson(data);
+  };
+  
+  next();
+});
+
 // Input validation schemas
 const validatorQuerySchema = Joi.object({
   limit: Joi.number().integer().min(1).max(1000).optional(),
@@ -111,8 +138,9 @@ const validateQuery = (schema: Joi.ObjectSchema) => {
   };
 };
 
-// OpenAPI/Swagger UI documentation
-app.use('/docs', swaggerUi.serve, swaggerUi.setup(specs, {
+// OpenAPI/Swagger UI documentation - serve at /docs with no redirect
+app.use('/docs', swaggerUi.serve);
+app.get('/docs', swaggerUi.setup(specs, {
   explorer: true,
   customCss: '.swagger-ui .topbar { display: none }',
   customSiteTitle: 'Validator Analytics API Documentation'
@@ -121,18 +149,29 @@ app.use('/docs', swaggerUi.serve, swaggerUi.setup(specs, {
 // API root endpoint
 app.get('/', (req, res) => {
   res.json({
-    success: true,
-    message: 'Validator Analytics API v1.0.0',
-    version: '1.0.0',
+    service: 'Validator Analytics API',
+    version: '2.0.0',
+    description: 'Solana Validator Analytics API - Deep Analytics for V2 endpoints',
     documentation: '/docs',
-    endpoints: [
-      '/validators',
-      '/validator/:voteAccount', 
-      '/performance/:voteAccount',
-      '/stake/:walletAddress',
-      '/health'
-    ],
-    description: 'Solana Validator Analytics API - On-chain data only',
+    endpoints: {
+      '/api/validators': 'List all validators with filtering and sorting',
+      '/api/validators/:voteAccount': 'Detailed validator analytics by vote account',
+      '/api/validators/:voteAccount/history': 'Historical validator performance data',
+      '/api/epoch/current': 'Current epoch information and progress',
+      '/api/stake-accounts/:wallet': 'Stake accounts for a wallet address',
+      '/api/websocket/status': 'WebSocket service status and connection info',
+      '/ws': 'WebSocket endpoint for real-time updates',
+      '/health': 'Service health check'
+    },
+    features: {
+      v2: [
+        'Deep validator analytics',
+        'Historical performance tracking',
+        'Real-time epoch monitoring',
+        'Stake account analysis',
+        'WebSocket notifications'
+      ]
+    },
     timestamp: Date.now()
   });
 });
@@ -144,7 +183,7 @@ app.get('/health', async (req, res) => {
     res.json({
       status: 'ok',
       service: 'validator-analytics-api',
-      version: '1.0.0',
+      version: '2.0.0',
       timestamp: Date.now(),
       solana: health
     });
