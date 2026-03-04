@@ -59,6 +59,9 @@ web_modules/
 .env.test
 .env.production
 .env.local
+.env.mainnet
+.env.prod
+.env.staging
 
 # parcel-bundler cache
 .cache
@@ -121,3 +124,17 @@ Thumbs.db
 
 # Built application
 dist/
+
+# SSL Certificates and Private Keys - SECURITY RISK if committed
+*.pem
+*.crt
+*.key
+*.p12
+*.pfx
+*.cer
+*.der
+ssl/
+certs/
+certificates/
+nginx/ssl/
+monitoring/ssl/

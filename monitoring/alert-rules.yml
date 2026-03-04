@@ -1,0 +1,156 @@
+# Alert Rules for Validator Analytics API - Mainnet
+groups:
+  - name: validator_analytics_api.rules
+    rules:
+      # Service Availability Alerts
+      - alert: ValidatorAnalyticsAPIDown
+        expr: up{job="validator-analytics-api"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: validator-analytics-api
+        annotations:
+          summary: "Validator Analytics API is down"
+          description: "Validator Analytics API has been down for more than 2 minutes. Instance: {{ $labels.instance }}"
+
+      - alert: HighErrorRate
+        expr: (rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m])) * 100 > 5
+        for: 5m
+        labels:
+          severity: warning
+          service: validator-analytics-api
+        annotations:
+          summary: "High error rate detected"
+          description: "Error rate is {{ $value }}% for the last 5 minutes"
+
+      # Performance Alerts
+      - alert: HighResponseTime
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 2
+        for: 5m
+        labels:
+          severity: warning
+          service: validator-analytics-api
+        annotations:
+          summary: "High response time"
+          description: "95th percentile response time is {{ $value }}s"
+
+      - alert: HighMemoryUsage
+        expr: (process_resident_memory_bytes / 1024 / 1024) > 1500
+        for: 10m
+        labels:
+          severity: warning
+          service: validator-analytics-api
+        annotations:
+          summary: "High memory usage"
+          description: "Memory usage is {{ $value }}MB"
+
+      - alert: HighCPUUsage
+        expr: rate(process_cpu_seconds_total[5m]) * 100 > 80
+        for: 10m
+        labels:
+          severity: warning
+          service: validator-analytics-api
+        annotations:
+          summary: "High CPU usage"
+          description: "CPU usage is {{ $value }}%"
+
+  - name: redis.rules
+    rules:
+      # Redis Alerts
+      - alert: RedisDown
+        expr: redis_up == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: redis
+        annotations:
+          summary: "Redis is down"
+          description: "Redis instance has been down for more than 1 minute"
+
+      - alert: RedisHighMemoryUsage
+        expr: (redis_memory_used_bytes / redis_memory_max_bytes) * 100 > 90
+        for: 5m
+        labels:
+          severity: warning
+          service: redis
+        annotations:
+          summary: "Redis high memory usage"
+          description: "Redis memory usage is {{ $value }}%"
+
+      - alert: RedisConnectionsHigh
+        expr: redis_connected_clients > 100
+        for: 5m
+        labels:
+          severity: warning
+          service: redis
+        annotations:
+          summary: "High number of Redis connections"
+          description: "Redis has {{ $value }} connected clients"
+
+  - name: system.rules
+    rules:
+      # System Resource Alerts
+      - alert: HostHighCPUUsage
+        expr: (100 - (avg by (instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)) > 85
+        for: 10m
+        labels:
+          severity: warning
+          service: system
+        annotations:
+          summary: "Host high CPU usage"
+          description: "Host CPU usage is {{ $value }}%"
+
+      - alert: HostHighMemoryUsage
+        expr: ((node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes) * 100 > 90
+        for: 5m
+        labels:
+          severity: critical
+          service: system
+        annotations:
+          summary: "Host high memory usage"
+          description: "Host memory usage is {{ $value }}%"
+
+      - alert: HostDiskSpaceRunningOut
+        expr: ((node_filesystem_size_bytes - node_filesystem_free_bytes) / node_filesystem_size_bytes) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+          service: system
+        annotations:
+          summary: "Host disk space running out"
+          description: "Disk usage is {{ $value }}% on {{ $labels.mountpoint }}"
+
+      - alert: HostDiskSpaceCritical
+        expr: ((node_filesystem_size_bytes - node_filesystem_free_bytes) / node_filesystem_size_bytes) * 100 > 95
+        for: 1m
+        labels:
+          severity: critical
+          service: system
+        annotations:
+          summary: "Host disk space critical"
+          description: "Disk usage is {{ $value }}% on {{ $labels.mountpoint }}"
+
+  - name: solana.rules
+    rules:
+      # Solana Network and RPC Alerts
+      - alert: SolanaRPCUnreachable
+        expr: up{job="solana-rpc-monitoring"} == 0
+        for: 3m
+        labels:
+          severity: critical
+          service: solana-rpc
+        annotations:
+          summary: "Solana RPC endpoint unreachable"
+          description: "Solana RPC endpoint has been unreachable for more than 3 minutes"
+
+      # Application-specific Solana alerts would go here
+      # These would need custom metrics exposed by the application
+      - alert: ValidatorDataStale
+        expr: time() - validator_last_update_timestamp > 300
+        for: 1m
+        labels:
+          severity: warning
+          service: validator-analytics-api
+        annotations:
+          summary: "Validator data is stale"
+          description: "Validator data hasn't been updated for more than 5 minutes"

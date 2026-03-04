@@ -1,5 +1,5 @@
-# Use Node.js 18 LTS Alpine image
-FROM node:18-alpine
+# Use Node.js 18 LTS Alpine image with pinned digest for security
+FROM node:18-alpine@sha256:43eb8501752b21ca4e5b3e4d87c368fce455e90dba8cf0b70c5e90dab97c8b8e
 
 # Install curl for health checks
 RUN apk add --no-cache curl

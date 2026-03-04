@@ -61,8 +61,17 @@ const apiLimiter = rateLimit({
   },
 });
 
+// CORS Configuration - Use environment variable for allowed origins
+const corsOptions = {
+  origin: process.env.CORS_ORIGIN 
+    ? process.env.CORS_ORIGIN.split(',').map(origin => origin.trim())
+    : ['http://localhost:3000', 'http://localhost:3001'], // Default for development
+  credentials: true,
+  optionsSuccessStatus: 200,
+};
+
 // Middleware
-app.use(cors());
+app.use(cors(corsOptions));
 app.use(express.json());
 app.use(limiter); // Apply to all requests
 
